@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How Shazam Works</title>
+<style>/*__STYLES__*/</style>
+</head>
+<body>
+<div id="app">
+  <div id="tracker"></div>
+  <div id="stage">
+    <canvas id="stageCanvas"></canvas>
+    <div id="start">
+      <h1>How Shazam Works</h1>
+      <div class="modes">
+        <button id="modeLive">🎤 Live (mic)</button>
+        <div>
+          <select id="songSelect"></select>
+          <button id="modeCanned">▶ Canned playback</button>
+        </div>
+      </div>
+      <div id="status">Preparing song database…</div>
+      <button class="secondary" id="fsBtn">⛶ Fullscreen</button>
+    </div>
+    <div id="loading">Analysing… <span id="loadPct"></span></div>
+  </div>
+  <div id="caption"></div>
+  <div id="controls" class="hidden">
+    <button class="secondary" id="prevBtn">◀ Prev</button>
+    <button id="nextBtn">Next ▶ (Space)</button>
+    <button class="secondary" id="replayBtn">↺ Replay (R)</button>
+  </div>
+</div>
+<script>/*__SONGS__*/</script>
+<script>/*__WORKER__*/</script>
+<script>/*__SCRIPT__*/</script>
+</body>
+</html>
