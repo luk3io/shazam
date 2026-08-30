@@ -1,0 +1,47 @@
+// dsp.js — pure DSP core for the Shazam demo.
+// Runs unchanged in Node (tests), the browser (<script>), and the Web Worker (self).
+// No DOM, no Web Audio, no dependencies — just math on Float arrays.
+(function (root) {
+  // Tunable pipeline constants. Frames are ~93 ms at 11025 Hz; hop = 50% overlap.
+  const CONFIG = {
+    sampleRate: 11025, frameSize: 1024, hopSize: 512,
+    peakNeighborhoodTime: 3, peakNeighborhoodFreq: 3, peaksPerFrameCap: 5,
+    targetZoneMinDt: 1, targetZoneMaxDt: 63, targetZoneFreqRange: 200,
+    fanout: 8, minScore: 5,
+  };
+
+  // In-place iterative radix-2 Cooley–Tukey FFT. re/im are mutated to hold the transform.
+  function fft(re, im) {
+    const n = re.length;
+    // bit-reversal permutation
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        let tr = re[i]; re[i] = re[j]; re[j] = tr;
+        let ti = im[i]; im[i] = im[j]; im[j] = ti;
+      }
+    }
+    // butterflies
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let cwr = 1, cwi = 0;
+        for (let k = 0; k < len / 2; k++) {
+          const aRe = re[i + k], aIm = im[i + k];
+          const bRe = re[i + k + len / 2] * cwr - im[i + k + len / 2] * cwi;
+          const bIm = re[i + k + len / 2] * cwi + im[i + k + len / 2] * cwr;
+          re[i + k] = aRe + bRe; im[i + k] = aIm + bIm;
+          re[i + k + len / 2] = aRe - bRe; im[i + k + len / 2] = aIm - bIm;
+          const ncwr = cwr * wr - cwi * wi;
+          cwi = cwr * wi + cwi * wr; cwr = ncwr;
+        }
+      }
+    }
+  }
+
+  const DSP = { CONFIG, fft };
+  if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
+  else root.DSP = DSP;
+})(typeof self !== 'undefined' ? self : this);
