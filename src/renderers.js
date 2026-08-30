@@ -10,6 +10,8 @@
   const COMP_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b'];
 
   // Stage 1: air pressure over time. Draws d.pcm up to `p` (canned) or the whole buffer (live).
+  // Once drawn, highlights the slice Stage 2 will zoom into; while the clip plays, d.playhead
+  // (0..1) draws a moving cursor at the current sample.
   root.Renderers.waveform = (ctx, d, p, W, H) => {
     const pcm = d.pcm, n = pcm.length, mid = H / 2, show = Math.floor(n * p);
     ctx.strokeStyle = FG; ctx.lineWidth = 1.5; ctx.beginPath();
@@ -18,26 +20,55 @@
       ctx.lineTo(x, mid + (pcm[i] || 0) * mid * 0.9);
     }
     ctx.stroke();
+    // highlight the slice Stage 2 analyses (once the waveform has finished drawing)
+    if (p >= 1 && d.focusFrame != null && n > 0) {
+      const s = d.focusFrame * D.CONFIG.hopSize;
+      const x0 = (s / n) * W, w = Math.max(6, (D.CONFIG.frameSize / n) * W);
+      ctx.fillStyle = 'rgba(123,140,255,0.25)'; ctx.fillRect(x0, 0, w, H);
+      ctx.strokeStyle = '#7b8cff'; ctx.lineWidth = 2; ctx.strokeRect(x0, 0, w, H);
+      ctx.fillStyle = '#7b8cff'; ctx.font = '13px system-ui';
+      ctx.fillText('slice analysed next →', Math.min(x0 + w + 8, W - 180), 42);
+    }
+    // playback cursor (only while playing)
+    if (d.playhead != null) {
+      const cx = Math.max(0, Math.min(1, d.playhead)) * W;
+      ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    }
     ctx.fillStyle = AX; ctx.font = '16px system-ui';
     ctx.fillText('amplitude (air pressure) →', 12, 22);
     ctx.fillText('time →', W - 70, H - 12);
   };
 
-  // Stage 2 (note #6): a ~tens-of-ms slice decomposing into its strongest sine components.
+  // Stage 2 (note #6): first a minimap of the whole clip with the analysed slice highlighted
+  // (continuity from Stage 1), then that ~tens-of-ms slice decomposing into its strongest sines.
   root.Renderers.fourier = (ctx, d, p, W, H) => {
     const frame = D.CONFIG.frameSize, sr = d.sr, start = d.focusFrame * D.CONFIG.hopSize;
-    const pad = 40, topH = H * 0.34;
-    // the raw short slice on top
+    const pad = 40, n = d.pcm.length, inner = W - 2 * pad;
+    const mmH = H * 0.16, sliceTop = mmH + 26, sliceH = H * 0.20;
+    // --- minimap: the whole recording, with the analysed slice highlighted ---
+    ctx.strokeStyle = '#2f6f63'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = 0; x <= inner; x++) {
+      const i = Math.floor((x / inner) * n), y = mmH / 2 + (d.pcm[i] || 0) * (mmH / 2) * 0.9;
+      x ? ctx.lineTo(pad + x, y) : ctx.moveTo(pad + x, y);
+    }
+    ctx.stroke();
+    const mmx0 = pad + (start / n) * inner, mmw = Math.max(4, (frame / n) * inner);
+    ctx.fillStyle = 'rgba(123,140,255,0.30)'; ctx.fillRect(mmx0, 0, mmw, mmH);
+    ctx.strokeStyle = '#7b8cff'; ctx.lineWidth = 2; ctx.strokeRect(mmx0, 0, mmw, mmH);
+    ctx.fillStyle = AX; ctx.font = '13px system-ui';
+    ctx.fillText('the whole recording — zooming into the highlighted slice', pad, mmH + 16);
+    // --- the zoomed slice ---
     ctx.strokeStyle = FG; ctx.lineWidth = 2; ctx.beginPath();
     for (let i = 0; i < frame; i++) {
-      const x = pad + (i / frame) * (W - 2 * pad), y = topH / 2 + (d.pcm[start + i] || 0) * (topH / 2) * 0.9;
+      const x = pad + (i / frame) * inner, y = sliceTop + sliceH / 2 + (d.pcm[start + i] || 0) * (sliceH / 2) * 0.9;
       i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
     ctx.stroke();
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText(`a ~${Math.round(frame / sr * 1000)} ms slice of the waveform`, pad, 20);
-    ctx.fillText('= a sum of sine waves:', pad, topH + 22);
-    // FFT the windowed slice, pick the strongest few components
+    ctx.fillText(`this ~${Math.round(frame / sr * 1000)} ms slice =`, pad, sliceTop - 4);
+    ctx.fillText('a sum of sine waves:', pad, sliceTop + sliceH + 20);
+    // --- FFT the windowed slice, pick the strongest few components ---
     const win = D.hann(frame), re = new Float64Array(frame), im = new Float64Array(frame);
     for (let i = 0; i < frame; i++) { re[i] = (d.pcm[start + i] || 0) * win[i]; im[i] = 0; }
     D.fft(re, im);
@@ -45,12 +76,13 @@
     for (let b = 1; b < bins; b++) comps.push({ b, mag: Math.hypot(re[b], im[b]), phase: Math.atan2(im[b], re[b]) });
     comps.sort((a, b) => b.mag - a.mag);
     const K = 5, top = comps.slice(0, K), maxMag = (top[0] && top[0].mag > 0) ? top[0].mag : 1;
-    const shown = Math.max(1, Math.round(K * p)), rowH = (H - topH - 40) / K;
+    const rowsTop = sliceTop + sliceH + 34, rowH = (H - rowsTop) / K;
+    const shown = Math.max(1, Math.round(K * p));
     for (let k = 0; k < shown; k++) {
-      const c = top[k], f = c.b * sr / frame, amp = c.mag / maxMag, cy = topH + 40 + rowH * (k + 0.5);
+      const c = top[k], f = c.b * sr / frame, amp = c.mag / maxMag, cy = rowsTop + rowH * (k + 0.5);
       ctx.strokeStyle = COMP_COLORS[k % COMP_COLORS.length]; ctx.lineWidth = 1.5; ctx.beginPath();
-      for (let xx = 0; xx <= W - 2 * pad; xx++) {
-        const tt = (xx / (W - 2 * pad)) * (frame / sr);
+      for (let xx = 0; xx <= inner; xx++) {
+        const tt = (xx / inner) * (frame / sr);
         const y = cy + Math.sin(2 * Math.PI * f * tt + c.phase) * amp * (rowH * 0.4);
         xx ? ctx.lineTo(pad + xx, y) : ctx.moveTo(pad + xx, y);
       }
@@ -62,7 +94,7 @@
 
   // Stage 3 (note #7): reveal expands outward from the Stage-2 slice column so that single
   // FFT result is visibly "stacked" into the full time × frequency spectrogram.
-  root.Renderers.spectrogram = (ctx, d, p, W, H) => {
+  root.Renderers.spectrogram = (ctx, d, p, W, H, hideFocus) => {
     const cols = d.spec.columns, nT = d.spec.numFrames, nB = d.spec.numBins;
     let max = d.__specMax;
     if (!max) { max = 1e-9; for (const c of cols) for (let b = 0; b < nB; b++) if (c[b] > max) max = c[b]; d.__specMax = max; }
@@ -76,20 +108,25 @@
         ctx.fillStyle = heat(v); ctx.fillRect(t * cw, H - (b + 1) * ch, cw + 1, ch + 1);
       }
     }
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(focus * cw - 1, 0, cw + 2, H); // the Stage-2 slice
+    if (!hideFocus) { // the Stage-2 slice column + its caption (skipped when Stage 4 reuses this)
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(focus * cw - 1, 0, cw + 2, H);
+      ctx.fillStyle = AX; ctx.font = '15px system-ui';
+      ctx.fillText('the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
+    }
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText('the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
     ctx.fillText('frequency ↑', 10, H - 12); ctx.fillText('time →', W - 60, H - 12);
   };
 
   const px = (t, nT, W) => (t / nT) * W;
   const py = (f, nB, H) => H - (f / nB) * H;
 
-  // Stage 4: fade the spectrogram out, fade the constellation of strongest peaks in.
+  // Stage 4: keep the spectrogram bright while the peaks light up ON the bright spots, THEN
+  // fade the background down — so the constellation is clearly picked out (not everything at once).
   root.Renderers.peaks = (ctx, d, p, W, H) => {
     const nT = d.spec.numFrames, nB = d.spec.numBins;
-    ctx.globalAlpha = 0.25 * (1 - p);
-    root.Renderers.spectrogram(ctx, d, 1, W, H);
+    const bg = p < 0.5 ? 0.85 : Math.max(0.12, 0.85 - (p - 0.5) * 2 * 0.73); // bright, then fade
+    ctx.globalAlpha = bg;
+    root.Renderers.spectrogram(ctx, d, 1, W, H, true);
     ctx.globalAlpha = 1;
     const shown = Math.floor(d.peaks.length * p);
     ctx.fillStyle = '#ffd24b';
@@ -98,7 +135,7 @@
       ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 3, 0, 7); ctx.fill();
     }
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText('constellation map (strongest peaks only)', 12, 22);
+    ctx.fillText('strongest peaks light up, then the rest fades → constellation map', 12, 22);
   };
 
   // Stage 5: draw target-zone pairing lines from a few anchors, and show one packed hash.
@@ -106,17 +143,28 @@
     const nT = d.spec.numFrames, nB = d.spec.numBins;
     ctx.fillStyle = '#ffd24b';
     for (const pk of d.peaks) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 2.5, 0, 7); ctx.fill(); }
-    const anchors = d.peaks.filter((_, i) => i % 40 === 0).slice(0, 8);
-    const reveal = Math.floor(anchors.length * p) + 1;
-    ctx.strokeStyle = FG; ctx.lineWidth = 1.5;
-    anchors.slice(0, reveal).forEach(a => {
-      d.peaks.forEach(b => {
+    // Build the pairing connections once, then reveal them one-by-one, accelerating (slow → fast).
+    let segs = d.__fpSegs;
+    if (!segs) {
+      segs = [];
+      const anchors = d.peaks.filter((_, i) => i % 25 === 0).slice(0, 14);
+      for (const a of anchors) for (const b of d.peaks) {
         const dt = b.t - a.t;
-        if (dt >= D.CONFIG.targetZoneMinDt && dt <= D.CONFIG.targetZoneMaxDt && Math.abs(b.f - a.f) <= D.CONFIG.targetZoneFreqRange) {
-          ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
-        }
-      });
-    });
+        if (dt >= D.CONFIG.targetZoneMinDt && dt <= D.CONFIG.targetZoneMaxDt && Math.abs(b.f - a.f) <= D.CONFIG.targetZoneFreqRange) segs.push([a, b]);
+      }
+      d.__fpSegs = segs;
+    }
+    const shown = Math.floor(p * p * segs.length); // p*p = ease-in: slow at first, then speeding up
+    ctx.strokeStyle = FG; ctx.lineWidth = 1.5;
+    for (let i = 0; i < shown; i++) {
+      const a = segs[i][0], b = segs[i][1];
+      ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
+    }
+    if (shown > 0) { // emphasise the connection most recently added
+      const a = segs[shown - 1][0], b = segs[shown - 1][1];
+      ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
+    }
     ctx.fillStyle = '#e8e8f0'; ctx.font = '18px system-ui';
     if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
     ctx.fillStyle = AX; ctx.font = '15px system-ui';

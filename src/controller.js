@@ -48,7 +48,7 @@
     ['matching',     'Votes for the same song at the same time-offset reveal the match.'],
   ];
   const $ = id => document.getElementById(id);
-  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null;
+  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -81,7 +81,21 @@
   // Stage-1 "Play clip" button: lets the audience hear the recording they're looking at.
   function stopPlayback() {
     if (playSource) { playSource.stop(); playSource = null; }
+    cancelAnimationFrame(playAnim);
+    if (stageData) { stageData.playhead = null; if (stageIdx === 0) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
+  }
+  // While the clip plays, advance a playback cursor on the Stage-1 waveform each frame.
+  function startPlayheadLoop() {
+    cancelAnimationFrame(playAnim);
+    const tick = () => {
+      if (!playSource || stageIdx !== 0 || !stageData) { stopPlayback(); return; }
+      stageData.playhead = Math.min(1, playSource.elapsed() / (playSource.duration || 1));
+      draw(1);
+      if (playSource.isEnded() || stageData.playhead >= 1) { stopPlayback(); return; }
+      playAnim = requestAnimationFrame(tick);
+    };
+    playAnim = requestAnimationFrame(tick);
   }
   function updatePlayBtn() {
     $('playBtn').classList.toggle('hidden', stageIdx !== 0 || !stageData);
@@ -198,6 +212,7 @@
       playSource = IO.makeSource(stageData.pcm, stageData.sr);
       playSource.play();
       $('playBtn').textContent = '■ Stop clip';
+      startPlayheadLoop();
     };
     $('homeBtn').onclick = () => goHome();
     $('nextBtn').onclick = () => showStage(stageIdx + 1);

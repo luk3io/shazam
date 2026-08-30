@@ -74,8 +74,9 @@
 
   function makeSource(pcm, sr = SR()) {
     const Ctx = root.AudioContext || root.webkitAudioContext;
-    let ac = null, node = null;
+    let ac = null, node = null, startedAt = 0, ended = false;
     return {
+      duration: pcm.length / sr,
       play() {
         ac = new Ctx();
         // A freshly created AudioContext can start "suspended" under the browser's
@@ -84,9 +85,12 @@
         const b = ac.createBuffer(1, pcm.length, sr);
         b.copyToChannel(pcm, 0);
         node = ac.createBufferSource(); node.buffer = b;
-        node.connect(ac.destination); node.start();
+        node.onended = () => { ended = true; };
+        node.connect(ac.destination); startedAt = ac.currentTime; node.start();
       },
-      stop() { try { node && node.stop(); ac && ac.close(); } catch (e) {} },
+      elapsed() { return ac ? Math.max(0, ac.currentTime - startedAt) : 0; }, // seconds played
+      isEnded() { return ended; },
+      stop() { try { node && node.stop(); ac && ac.close(); } catch (e) {} ended = true; },
     };
   }
 
