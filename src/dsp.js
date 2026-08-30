@@ -91,7 +91,25 @@
     return peaks;
   }
 
-  const DSP = { CONFIG, fft, hann, stft, findPeaks };
+  // Pair each anchor peak with later peaks in a "target zone". Each pair (f1, f2, dt)
+  // packs into a 32-bit hash — a compact, distortion-tolerant fingerprint of the audio.
+  function fingerprint(peaks, cfg = CONFIG) {
+    const pts = [...peaks].sort((a, b) => a.t - b.t || a.f - b.f), fps = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i]; let paired = 0;
+      for (let j = i + 1; j < pts.length && paired < cfg.fanout; j++) {
+        const b = pts[j], dt = b.t - a.t;
+        if (dt < cfg.targetZoneMinDt) continue;
+        if (dt > cfg.targetZoneMaxDt) break;
+        if (Math.abs(b.f - a.f) > cfg.targetZoneFreqRange) continue;
+        const hash = (((a.f & 0x1FF) << 23) | ((b.f & 0x1FF) << 14) | (dt & 0x3FFF)) >>> 0;
+        fps.push({ hash, t: a.t }); paired++;
+      }
+    }
+    return fps;
+  }
+
+  const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint };
   if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
   else root.DSP = DSP;
 })(typeof self !== 'undefined' ? self : this);
