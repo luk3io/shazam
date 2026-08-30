@@ -66,7 +66,32 @@
     return { columns, numFrames, numBins };
   }
 
-  const DSP = { CONFIG, fft, hann, stft };
+  // Keep only points that are a local maximum within a time x frequency neighborhood,
+  // then keep the strongest few per frame. These sparse peaks survive noise and EQ changes.
+  function findPeaks(spec, cfg = CONFIG) {
+    const { columns, numFrames, numBins } = spec;
+    const dt = cfg.peakNeighborhoodTime, df = cfg.peakNeighborhoodFreq, peaks = [];
+    for (let t = 0; t < numFrames; t++) {
+      const col = columns[t], cand = [];
+      for (let b = 1; b < numBins - 1; b++) {
+        const v = col[b];
+        if (v <= 0 || v < col[b - 1] || v < col[b + 1]) continue;
+        let isMax = true;
+        for (let tt = Math.max(0, t - dt); tt <= Math.min(numFrames - 1, t + dt) && isMax; tt++) {
+          const c2 = columns[tt];
+          for (let bb = Math.max(0, b - df); bb <= Math.min(numBins - 1, b + df); bb++) {
+            if (c2[bb] > v) { isMax = false; break; }
+          }
+        }
+        if (isMax) cand.push({ t, f: b, mag: v });
+      }
+      cand.sort((a, b) => b.mag - a.mag);
+      for (let i = 0; i < Math.min(cfg.peaksPerFrameCap, cand.length); i++) peaks.push(cand[i]);
+    }
+    return peaks;
+  }
+
+  const DSP = { CONFIG, fft, hann, stft, findPeaks };
   if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
   else root.DSP = DSP;
 })(typeof self !== 'undefined' ? self : this);
