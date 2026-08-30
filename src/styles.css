@@ -7,8 +7,11 @@ html, body { height: 100%; background: #0a0a12; color: #e8e8f0;
   background: #16162a; color: #6a6a88; font-size: 15px; font-weight: 600; }
 #tracker .step.active { background: #2b2bff; color: #fff; }
 #tracker .step.done { color: #9a9ac8; }
-#stage { flex: 1; position: relative; }
-#stageCanvas { width: 100%; height: 100%; display: block; }
+/* min-height:0 lets this flex item shrink instead of overflowing the viewport;
+   the canvas is absolutely positioned so it never forces #stage taller than its
+   flex share (which would push #controls below the fold on shorter screens). */
+#stage { flex: 1; position: relative; min-height: 0; }
+#stageCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #caption { padding: 12px 24px; font-size: 20px; text-align: center; min-height: 52px; }
 #controls { display: flex; gap: 12px; justify-content: center; padding: 0 20px 18px; }
 button { font-size: 18px; padding: 12px 22px; border: 0; border-radius: 10px;
