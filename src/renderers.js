@@ -1,4 +1,6 @@
-// renderers.js — one canvas renderer per pipeline stage. Filled in Tasks 10-11.
+// renderers.js — one canvas renderer per pipeline stage (waveform, fourier, spectrogram,
+// peaks, fingerprints, matching). Each renderer takes a 0..1 progress value and draws that
+// much of its stage's reveal animation against the shared stageData computed by controller.js.
 (function (root) {
   root.Renderers = {};
   const D = root.DSP;

@@ -20,11 +20,17 @@ const read = p => readFileSync(p, 'utf8');
 const workerSource = read('src/dsp.js') + '\n' + read('src/worker.js');
 const bundle = [read('src/dsp.js'), read('src/audio.js'), read('src/renderers.js'), read('src/controller.js')].join('\n\n');
 
+// Defensive: a literal "</script" inside embedded content would prematurely close the
+// <script> tag it's injected into. None of our sources/base64 contain it today, but escape
+// it anyway so the build can never produce a broken page. Applied to the individual pieces
+// being embedded (not the final HTML), so the real closing </script> tags are untouched.
+const escapeScriptClose = s => s.replace(/<\/script/gi, '<\\/script');
+
 const html = read('src/template.html')
   .replace('/*__STYLES__*/', () => read('src/styles.css'))
-  .replace('/*__SONGS__*/', () => 'var SONGS=' + JSON.stringify(songs) + ';')
-  .replace('/*__WORKER__*/', () => 'var WORKER_SOURCE=' + JSON.stringify(workerSource) + ';')
-  .replace('/*__SCRIPT__*/', () => bundle);
+  .replace('/*__SONGS__*/', () => 'var SONGS=' + escapeScriptClose(JSON.stringify(songs)) + ';')
+  .replace('/*__WORKER__*/', () => 'var WORKER_SOURCE=' + escapeScriptClose(JSON.stringify(workerSource)) + ';')
+  .replace('/*__SCRIPT__*/', () => escapeScriptClose(bundle));
 
 writeFileSync('shazam-demo.html', html);
 const mb = (Buffer.byteLength(html) / 1048576).toFixed(1);

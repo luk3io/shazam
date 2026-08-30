@@ -1,5 +1,7 @@
-// controller.js — orchestrates the demo. This minimal version loads the song database
-// (via the worker) and exposes a self-test; the full UI/state machine is added in Task 9.
+// controller.js — orchestrates the demo: loads the song database via the worker, drives the
+// canned/live capture flow, precomputes every stage's data up front, and runs the six-stage
+// pipeline UI (stage tracker, canvas draw loop, keyboard/button navigation). Also exposes a
+// window.__selfTest() hook (enabled via ?selftest) for headless verification.
 (function (root) {
   const D = root.DSP, IO = root.AudioIO;
 
