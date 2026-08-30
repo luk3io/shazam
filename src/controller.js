@@ -129,14 +129,17 @@
       .catch(err => { $('status').textContent = 'Database error: ' + err.message; });
 
     $('modeCanned').onclick = () => runCanned();
-    $('modeLive').onclick = () => runLive().catch(err =>
-      alert('Microphone unavailable (' + err.name + '). Use Chrome/Edge, allow mic access, or use Canned playback.'));
+    $('modeLive').onclick = () => runLive().catch(err => {
+      $('start').classList.remove('hidden'); $('controls').classList.add('hidden');
+      alert('Microphone unavailable (' + err.name + '). Use Chrome/Edge, allow mic access, or use Canned playback.');
+    });
     $('fsBtn').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
     $('nextBtn').onclick = () => showStage(stageIdx + 1);
     $('prevBtn').onclick = () => showStage(stageIdx - 1);
     $('replayBtn').onclick = () => animateStage();
     document.addEventListener('keydown', e => {
       if (!$('start').classList.contains('hidden')) return; // ignore keys on start screen
+      if (!stageData) return; // ignore keys before precompute finishes (e.g. during live listening)
       if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); showStage(stageIdx + 1); }
       else if (e.code === 'ArrowLeft') showStage(stageIdx - 1);
       else if (e.key.toLowerCase() === 'r') animateStage();
