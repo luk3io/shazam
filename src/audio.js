@@ -36,7 +36,11 @@
   }
 
   function sliceSeconds(pcm, startSec, durSec, sr = SR()) {
-    const a = Math.floor(startSec * sr), b = Math.min(pcm.length, a + Math.floor(durSec * sr));
+    // Clamp the start so a short track (durSec longer than what's left) still yields the
+    // available tail instead of an empty slice; long songs (today's 5) are unaffected.
+    const maxStart = Math.max(0, pcm.length / sr - durSec);
+    const startClamped = Math.min(startSec, maxStart);
+    const a = Math.floor(startClamped * sr), b = Math.min(pcm.length, a + Math.floor(durSec * sr));
     return pcm.slice(a, b);
   }
 

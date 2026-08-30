@@ -22,4 +22,8 @@ button.secondary { background: #23233a; }
 #loading { position: absolute; inset: 0; display: none; align-items: center;
   justify-content: center; font-size: 24px; background: rgba(10,10,18,.9); z-index: 20; }
 select { font-size: 18px; padding: 10px; border-radius: 8px; }
+#levelMeter { position: absolute; left: 24px; right: 24px; bottom: 20px; height: 10px;
+  border-radius: 6px; background: #16162a; overflow: hidden; z-index: 5; }
+#levelBar { height: 100%; width: 0%; opacity: .35; background: #4be0c0;
+  transition: width 60ms linear, opacity 60ms linear; }
 .hidden { display: none !important; }

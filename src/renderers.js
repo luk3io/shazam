@@ -138,13 +138,19 @@
       const y = H - 40 - (((tq + off) / (nT + Math.abs(off))) * (H - 100));
       ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
     }
-    if (p >= 1 && d.matchedSong) {
+    if (p >= 1) {
       ctx.fillStyle = 'rgba(10,10,18,.82)'; ctx.fillRect(0, 0, W, H);
       ctx.textAlign = 'center';
-      ctx.fillStyle = FG; ctx.font = 'bold 30px system-ui'; ctx.fillText('MATCH', W / 2, H / 2 - 40);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 40px system-ui'; ctx.fillText(d.matchedSong.title, W / 2, H / 2 + 6);
-      ctx.fillStyle = '#9a9ac8'; ctx.font = '24px system-ui';
-      ctx.fillText(`${d.matchedSong.artist}   ·   ${best.score} votes`, W / 2, H / 2 + 48);
+      if (d.matchedSong) {
+        ctx.fillStyle = FG; ctx.font = 'bold 30px system-ui'; ctx.fillText('MATCH', W / 2, H / 2 - 40);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 40px system-ui'; ctx.fillText(d.matchedSong.title, W / 2, H / 2 + 6);
+        ctx.fillStyle = '#9a9ac8'; ctx.font = '24px system-ui';
+        ctx.fillText(`${d.matchedSong.artist}   ·   ${best.score} votes`, W / 2, H / 2 + 48);
+      } else {
+        ctx.fillStyle = '#ff5b5b'; ctx.font = 'bold 30px system-ui'; ctx.fillText('No confident match', W / 2, H / 2 - 10);
+        ctx.fillStyle = '#9a9ac8'; ctx.font = '20px system-ui';
+        ctx.fillText(best ? `top guess only reached ${best.score} votes` : 'no candidate votes at all', W / 2, H / 2 + 30);
+      }
       ctx.textAlign = 'left';
     }
   };

@@ -12,21 +12,29 @@
   }
 
   // Decode each song on the main thread, fingerprint it in the worker, and build the DB.
+  // Resilient to a single bad song: skip it (console.warn) and keep going, so a corrupt
+  // file or worker hiccup on one track doesn't brick the whole demo.
   async function loadDatabase(songs, onProgress) {
     const worker = makeWorker();
     const perSong = [];
     for (let i = 0; i < songs.length; i++) {
       const s = songs[i];
-      s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data));
-      const fingerprints = await new Promise(res => {
-        worker.onmessage = e => res(e.data.fingerprints);
-        const copy = s._pcm.slice();               // keep our pcm; transfer a copy
-        worker.postMessage({ id: s.id, pcm: copy }, [copy.buffer]);
-      });
-      perSong.push({ songId: s.id, fingerprints });
+      try {
+        s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data));
+        const fingerprints = await new Promise((res, reject) => {
+          worker.onmessage = e => res(e.data.fingerprints);
+          worker.onerror = e => reject(e.message ? new Error(e.message) : e);
+          const copy = s._pcm.slice();               // keep our pcm; transfer a copy
+          worker.postMessage({ id: s.id, pcm: copy }, [copy.buffer]);
+        });
+        perSong.push({ songId: s.id, fingerprints });
+      } catch (err) {
+        console.warn(`Skipping song "${s.title || s.id}" — failed to load/fingerprint:`, err);
+      }
       if (onProgress) onProgress(Math.round(((i + 1) / songs.length) * 100));
     }
     worker.terminate();
+    if (perSong.length === 0) throw new Error('No songs loaded successfully');
     return D.buildDatabase(perSong);
   }
   root.App = { loadDatabase, makeWorker };
@@ -40,7 +48,7 @@
     ['matching',     'Votes for the same song at the same time-offset reveal the match.'],
   ];
   const $ = id => document.getElementById(id);
-  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null;
+  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -69,8 +77,19 @@
     };
     anim = requestAnimationFrame(tick);
   }
+  // Stage-1 "Play clip" button: lets the audience hear the recording they're looking at.
+  function stopPlayback() {
+    if (playSource) { playSource.stop(); playSource = null; }
+    $('playBtn').textContent = '▶ Play clip';
+  }
+  function updatePlayBtn() {
+    $('playBtn').classList.toggle('hidden', stageIdx !== 0 || !stageData);
+  }
   function showStage(i) {
+    const wasStage0 = stageIdx === 0;
     stageIdx = Math.max(0, Math.min(STAGES.length - 1, i));
+    if (wasStage0 && stageIdx !== 0) stopPlayback();
+    updatePlayBtn();
     $('caption').textContent = STAGES[stageIdx][1];
     renderTracker(); animateStage();
   }
@@ -79,7 +98,9 @@
   function precompute(pcm) {
     const spec = D.stft(pcm), peaks = D.findPeaks(spec), fps = D.fingerprint(peaks);
     const results = D.matchQuery(fps, db);
-    const matchedSong = root.SONGS.find(s => s.id === (results[0] && results[0].songId)) || null;
+    const best = results[0];
+    const matchedSong = (best && best.score >= D.CONFIG.minScore)
+      ? (root.SONGS.find(s => s.id === best.songId) || null) : null;
     const focusFrame = Math.max(0, Math.floor(spec.numFrames / 2)); // slice Stage 2/3 share
     stageData = { pcm, sr: D.CONFIG.sampleRate, spec, peaks, fingerprints: fps, results, songs: root.SONGS, matchedSong, focusFrame };
   }
@@ -90,9 +111,21 @@
 
   // --- Live mode: draw the waveform in real time while recording ---
   async function runLive() {
+    stageData = null; // close the keyboard-gate gap: a stale prior stageData would let
+                       // keypresses drive stages during this run's "Listening…" window
     $('start').classList.add('hidden'); $('controls').classList.add('hidden');
     stageIdx = 0; renderTracker();
-    $('caption').textContent = 'Listening… play the song now.';
+    // Countdown + live input-level cue so the presenter/audience can see the mic is picking
+    // up sound during the 10 s capture window.
+    let remaining = 10;
+    const setCaption = () => { $('caption').textContent = `Listening… play the song now. (${remaining}s)`; };
+    setCaption();
+    const countdown = setInterval(() => { remaining = Math.max(0, remaining - 1); setCaption(); }, 1000);
+    $('levelMeter').classList.remove('hidden');
+    const onLevel = level => {
+      const v = Math.max(0, Math.min(1, level));
+      const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
+    };
     // Live visual buffer: draw raw mic samples as they arrive (shape only — no resampling).
     // Sized for the worst-case native mic rate so it never overflows during the 10 s capture.
     const live = new Float32Array(48000 * 11); let filled = 0;
@@ -101,8 +134,14 @@
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
       root.Renderers.waveform(ctx, { pcm: live.subarray(0, filled) }, 1, W, H); // maps across full width
     };
-    // captureMicStreaming returns the recording correctly resampled to the DSP rate.
-    const pcm = await IO.captureMicStreaming(10, onChunk, null);
+    let pcm;
+    try {
+      // captureMicStreaming returns the recording correctly resampled to the DSP rate.
+      pcm = await IO.captureMicStreaming(10, onChunk, onLevel);
+    } finally {
+      clearInterval(countdown);
+      $('levelMeter').classList.add('hidden');
+    }
     $('caption').textContent = 'Analysing…';
     await dbReady;
     precompute(pcm);
@@ -136,6 +175,13 @@
       alert('Microphone unavailable (' + err.name + '). Use Chrome/Edge, allow mic access, or use Canned playback.');
     });
     $('fsBtn').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+    $('playBtn').onclick = () => {
+      if (!stageData) return;
+      if (playSource) { stopPlayback(); return; }
+      playSource = IO.makeSource(stageData.pcm, stageData.sr);
+      playSource.play();
+      $('playBtn').textContent = '■ Stop clip';
+    };
     $('nextBtn').onclick = () => showStage(stageIdx + 1);
     $('prevBtn').onclick = () => showStage(stageIdx - 1);
     $('replayBtn').onclick = () => animateStage();
