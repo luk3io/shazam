@@ -109,7 +109,38 @@
     return fps;
   }
 
-  const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint };
+  // Index every fingerprint by its hash: hash -> list of (songId, anchor time).
+  function buildDatabase(perSong) {
+    const db = new Map();
+    for (const { songId, fingerprints } of perSong)
+      for (const { hash, t } of fingerprints) {
+        let arr = db.get(hash); if (!arr) { arr = []; db.set(hash, arr); }
+        arr.push({ songId, t });
+      }
+    return db;
+  }
+  // For each query hash, every DB hit votes for (song, time-offset). The correct song
+  // accumulates many votes at ONE consistent offset; noise scatters across offsets.
+  function matchQuery(queryFps, db, cfg = CONFIG) {
+    const votes = new Map(); // songId -> Map(offset -> count)
+    for (const { hash, t } of queryFps) {
+      const arr = db.get(hash); if (!arr) continue;
+      for (const { songId, t: td } of arr) {
+        const offset = td - t;
+        let m = votes.get(songId); if (!m) { m = new Map(); votes.set(songId, m); }
+        m.set(offset, (m.get(offset) || 0) + 1);
+      }
+    }
+    const results = [];
+    for (const [songId, m] of votes) {
+      let best = 0, bestOff = 0;
+      for (const [off, c] of m) if (c > best) { best = c; bestOff = off; }
+      results.push({ songId, score: best, offset: bestOff });
+    }
+    return results.sort((a, b) => b.score - a.score);
+  }
+
+  const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint, buildDatabase, matchQuery };
   if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
   else root.DSP = DSP;
 })(typeof self !== 'undefined' ? self : this);
