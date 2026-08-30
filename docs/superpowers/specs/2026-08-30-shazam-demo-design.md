@@ -79,9 +79,9 @@ Each stage renderer then just replays precomputed data against an animation cloc
 
 ## Songs & build step
 
-- 5 recognisable MP3s live in `assets/songs/` with a small metadata file (title, artist per file).
-- A re-runnable build script (Node) reads the MP3s, base64-encodes them, and injects them plus metadata into an HTML template, producing the single-file deliverable `shazam-demo.html`.
-- Swapping songs later = replace files in `assets/songs/`, update metadata, re-run one command.
+- 5 recognisable MP3s live in `./songs/` (git-ignored — local only, swappable). Metadata is parsed from the filename convention `Artist - Song title.mp3`; no separate metadata file.
+- A re-runnable build script (Node) reads the MP3s, base64-encodes each **full song**, and injects them plus parsed metadata into an HTML template, producing the single-file deliverable `shazam-demo.html`. Embedding full songs means the live demo can match *any* section the presenter plays; the trade-off is a larger output file (~30–35 MB) that takes a few seconds to decode/fingerprint on first open. Songs are decoded, downmixed to mono, and resampled to a low rate (~16 kHz) in-browser for DSP — fingerprinting is robust to this.
+- Swapping songs later = replace files in `./songs/`, re-run one command.
 - The demo requires the 5 MP3s to exist before the first real build; the project scaffolds and is testable with placeholder audio until then.
 
 ## Testing
@@ -96,7 +96,7 @@ Each stage renderer then just replays precomputed data against an animation cloc
 |------|-----------|
 | Safari blocks mic on `file://` | Recommend Chrome/Edge for live; canned works everywhere. |
 | Live match fails in a noisy room | Canned fallback is one click away; rehearse and tune peak/target-zone params against the actual songs. |
-| Large embedded MP3s bloat the file | Keep clips/songs short (~30–60 s each); 5 songs stays comfortably openable. |
+| Full embedded MP3s make a large (~30–35 MB) file | Acceptable for a local double-click file; decode/fingerprint once at load. If it ever becomes a problem, trim segments per song. |
 | Mid-demo computation jank | Precompute-then-replay; nothing heavy runs during stepping. |
 
 ## Deliverables
