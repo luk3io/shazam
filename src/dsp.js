@@ -41,7 +41,32 @@
     }
   }
 
-  const DSP = { CONFIG, fft };
+  // Hann window reduces spectral leakage before the FFT.
+  function hann(n) {
+    const w = new Float64Array(n);
+    for (let i = 0; i < n; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
+    return w;
+  }
+  // Short-Time Fourier Transform: slide a windowed FFT across the signal.
+  // Returns one magnitude column per frame -> the spectrogram.
+  function stft(pcm, cfg = CONFIG) {
+    const { frameSize, hopSize } = cfg;
+    const win = hann(frameSize), numBins = frameSize / 2;
+    const numFrames = Math.max(0, 1 + Math.floor((pcm.length - frameSize) / hopSize));
+    const columns = [];
+    const re = new Float64Array(frameSize), im = new Float64Array(frameSize);
+    for (let f = 0; f < numFrames; f++) {
+      const off = f * hopSize;
+      for (let i = 0; i < frameSize; i++) { re[i] = pcm[off + i] * win[i]; im[i] = 0; }
+      fft(re, im);
+      const col = new Float32Array(numBins);
+      for (let b = 0; b < numBins; b++) col[b] = Math.hypot(re[b], im[b]);
+      columns.push(col);
+    }
+    return { columns, numFrames, numBins };
+  }
+
+  const DSP = { CONFIG, fft, hann, stft };
   if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
   else root.DSP = DSP;
 })(typeof self !== 'undefined' ? self : this);
