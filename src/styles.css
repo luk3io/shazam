@@ -2,7 +2,9 @@
 html, body { height: 100%; background: #0a0a12; color: #e8e8f0;
   font-family: system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
 #app { height: 100%; display: flex; flex-direction: column; }
-#tracker { display: flex; gap: 8px; padding: 14px 20px; }
+#topbar { display: flex; align-items: center; gap: 10px; padding-left: 16px; }
+#homeBtn { white-space: nowrap; padding: 8px 14px; font-size: 15px; }
+#tracker { display: flex; gap: 8px; padding: 14px 20px; flex: 1; }
 #tracker .step { flex: 1; text-align: center; padding: 8px; border-radius: 8px;
   background: #16162a; color: #6a6a88; font-size: 15px; font-weight: 600; }
 #tracker .step.active { background: #2b2bff; color: #fff; }

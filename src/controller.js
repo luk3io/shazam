@@ -64,6 +64,7 @@
   }
   function draw(progress) {
     const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
+    if (!stageData) return; // nothing to render (e.g. after returning to the start screen)
     (root.Renderers[STAGES[stageIdx][0]] || (() => {}))(ctx, stageData, progress, W, H);
   }
   function animateStage() {
@@ -93,6 +94,20 @@
     $('caption').textContent = STAGES[stageIdx][1];
     renderTracker(); animateStage();
   }
+  // Return to the start screen so a new mode/song can be chosen without reloading the page.
+  function goHome() {
+    stopPlayback();
+    cancelAnimationFrame(anim);
+    stageData = null; stageIdx = 0;
+    $('controls').classList.add('hidden');
+    $('levelMeter').classList.add('hidden');
+    $('homeBtn').classList.add('hidden');
+    updatePlayBtn();
+    $('caption').textContent = '';
+    const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
+    renderTracker();
+    $('start').classList.remove('hidden');
+  }
 
   // Compute every artifact a renderer needs for the given recording PCM, up front.
   function precompute(pcm) {
@@ -106,6 +121,7 @@
   }
   function enterPipeline() {
     $('start').classList.add('hidden'); $('controls').classList.remove('hidden');
+    $('homeBtn').classList.remove('hidden');
     showStage(0);
   }
 
@@ -146,6 +162,7 @@
     await dbReady;
     precompute(pcm);
     $('controls').classList.remove('hidden');
+    $('homeBtn').classList.remove('hidden');
     showStage(0);
   }
 
@@ -182,6 +199,7 @@
       playSource.play();
       $('playBtn').textContent = '■ Stop clip';
     };
+    $('homeBtn').onclick = () => goHome();
     $('nextBtn').onclick = () => showStage(stageIdx + 1);
     $('prevBtn').onclick = () => showStage(stageIdx - 1);
     $('replayBtn').onclick = () => animateStage();
