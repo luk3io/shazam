@@ -42,7 +42,7 @@
     const bins = frame / 2, comps = [];
     for (let b = 1; b < bins; b++) comps.push({ b, mag: Math.hypot(re[b], im[b]), phase: Math.atan2(im[b], re[b]) });
     comps.sort((a, b) => b.mag - a.mag);
-    const K = 5, top = comps.slice(0, K), maxMag = top[0] ? top[0].mag : 1;
+    const K = 5, top = comps.slice(0, K), maxMag = (top[0] && top[0].mag > 0) ? top[0].mag : 1;
     const shown = Math.max(1, Math.round(K * p)), rowH = (H - topH - 40) / K;
     for (let k = 0; k < shown; k++) {
       const c = top[k], f = c.b * sr / frame, amp = c.mag / maxMag, cy = topH + 40 + rowH * (k + 0.5);
