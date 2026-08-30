@@ -38,7 +38,7 @@
       ctx.fillStyle = 'rgba(123,140,255,0.25)'; ctx.fillRect(x0, 0, w, H);
       ctx.strokeStyle = '#7b8cff'; ctx.lineWidth = 2; ctx.strokeRect(x0, 0, w, H);
       ctx.fillStyle = '#7b8cff'; ctx.font = '13px system-ui';
-      ctx.fillText('slice analysed next →', Math.min(x0 + w + 8, W - 180), 42);
+      ctx.fillText('drag to move — analysed in Fourier', Math.min(x0 + w + 8, W - 270), 42);
     }
     // playback cursor (only while playing)
     if (d.playhead != null) {
@@ -68,7 +68,7 @@
     ctx.fillStyle = 'rgba(123,140,255,0.30)'; ctx.fillRect(mmx0, 0, mmw, mmH);
     ctx.strokeStyle = '#7b8cff'; ctx.lineWidth = 2; ctx.strokeRect(mmx0, 0, mmw, mmH);
     ctx.fillStyle = AX; ctx.font = '13px system-ui';
-    ctx.fillText('the whole recording — zooming into the highlighted slice', pad, mmH + 16);
+    ctx.fillText('the whole recording — drag the highlighted slice to move it', pad, mmH + 16);
     // --- the zoomed slice ---
     ctx.strokeStyle = FG; ctx.lineWidth = 2; ctx.beginPath();
     for (let i = 0; i < frame; i++) {

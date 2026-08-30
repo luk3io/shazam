@@ -105,6 +105,7 @@
     stageIdx = Math.max(0, Math.min(STAGES.length - 1, i));
     if (wasStage0 && stageIdx !== 0) stopPlayback();
     updatePlayBtn();
+    canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize' : 'default'; // slice is draggable
     $('caption').textContent = STAGES[stageIdx][1];
     renderTracker(); animateStage();
   }
@@ -225,6 +226,36 @@
       else if (e.code === 'ArrowLeft') showStage(stageIdx - 1);
       else if (e.key.toLowerCase() === 'r') animateStage();
     });
+    // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
+    // (Stage 2) to move which ~93 ms slice gets analysed.
+    let dragging = false;
+    const SLICE_PAD = 40; // must match the `pad` used in Renderers.fourier's minimap
+    function frameFromEvent(e) {
+      if (!stageData) return null;
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const n = stageData.pcm.length, maxF = stageData.spec.numFrames - 1;
+      let frac;
+      if (stageIdx === 0) {
+        frac = x / r.width;                          // waveform spans the full width
+      } else if (stageIdx === 1) {
+        if (y > r.height * 0.16 + 20) return null;   // only the minimap band is draggable
+        frac = (x - SLICE_PAD) / (r.width - 2 * SLICE_PAD);
+      } else return null;
+      frac = Math.max(0, Math.min(1, frac));
+      return Math.max(0, Math.min(maxF, Math.round(frac * n / D.CONFIG.hopSize)));
+    }
+    function applyFocus(e) {
+      const f = frameFromEvent(e);
+      if (f == null || !stageData || f === stageData.focusFrame) return;
+      stageData.focusFrame = f; draw(1);
+    }
+    canvas.addEventListener('mousedown', e => {
+      if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; cancelAnimationFrame(anim); applyFocus(e); }
+    });
+    canvas.addEventListener('mousemove', e => { if (dragging) applyFocus(e); });
+    window.addEventListener('mouseup', () => { dragging = false; });
+    canvas.addEventListener('mouseleave', () => { dragging = false; });
     window.addEventListener('resize', resize);
     resize();
   }
