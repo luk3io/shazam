@@ -9,6 +9,17 @@
   const heat = v => HOT[Math.round(Math.max(0, Math.min(0.999, v)) * (HOT.length - 1))];
   const COMP_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b'];
 
+  // Faint time × frequency reference grid, drawn over the spectrogram cells.
+  function drawGrid(ctx, W, H, cols = 16, rows = 8) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < cols; i++) { const x = (i / cols) * W; ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let j = 1; j < rows; j++) { const y = (j / rows) * H; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Stage 1: air pressure over time. Draws d.pcm up to `p` (canned) or the whole buffer (live).
   // Once drawn, highlights the slice Stage 2 will zoom into; while the clip plays, d.playhead
   // (0..1) draws a moving cursor at the current sample.
@@ -108,6 +119,7 @@
         ctx.fillStyle = heat(v); ctx.fillRect(t * cw, H - (b + 1) * ch, cw + 1, ch + 1);
       }
     }
+    drawGrid(ctx, W, H); // faint reference grid over the spectrogram (Stage 3 and behind Stage 4)
     if (!hideFocus) { // the Stage-2 slice column + its caption (skipped when Stage 4 reuses this)
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(focus * cw - 1, 0, cw + 2, H);
       ctx.fillStyle = AX; ctx.font = '15px system-ui';
