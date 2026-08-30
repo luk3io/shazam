@@ -79,4 +79,71 @@
     ctx.fillText('the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
     ctx.fillText('frequency ↑', 10, H - 12); ctx.fillText('time →', W - 60, H - 12);
   };
+
+  const px = (t, nT, W) => (t / nT) * W;
+  const py = (f, nB, H) => H - (f / nB) * H;
+
+  // Stage 4: fade the spectrogram out, fade the constellation of strongest peaks in.
+  root.Renderers.peaks = (ctx, d, p, W, H) => {
+    const nT = d.spec.numFrames, nB = d.spec.numBins;
+    ctx.globalAlpha = 0.25 * (1 - p);
+    root.Renderers.spectrogram(ctx, d, 1, W, H);
+    ctx.globalAlpha = 1;
+    const shown = Math.floor(d.peaks.length * p);
+    ctx.fillStyle = '#ffd24b';
+    for (let i = 0; i < shown; i++) {
+      const pk = d.peaks[i];
+      ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 3, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = AX; ctx.font = '15px system-ui';
+    ctx.fillText('constellation map (strongest peaks only)', 12, 22);
+  };
+
+  // Stage 5: draw target-zone pairing lines from a few anchors, and show one packed hash.
+  root.Renderers.fingerprints = (ctx, d, p, W, H) => {
+    const nT = d.spec.numFrames, nB = d.spec.numBins;
+    ctx.fillStyle = '#ffd24b';
+    for (const pk of d.peaks) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 2.5, 0, 7); ctx.fill(); }
+    const anchors = d.peaks.filter((_, i) => i % 40 === 0).slice(0, 8);
+    const reveal = Math.floor(anchors.length * p) + 1;
+    ctx.strokeStyle = FG; ctx.lineWidth = 1.5;
+    anchors.slice(0, reveal).forEach(a => {
+      d.peaks.forEach(b => {
+        const dt = b.t - a.t;
+        if (dt >= D.CONFIG.targetZoneMinDt && dt <= D.CONFIG.targetZoneMaxDt && Math.abs(b.f - a.f) <= D.CONFIG.targetZoneFreqRange) {
+          ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
+        }
+      });
+    });
+    ctx.fillStyle = '#e8e8f0'; ctx.font = '18px system-ui';
+    if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
+    ctx.fillStyle = AX; ctx.font = '15px system-ui';
+    ctx.fillText('pair peaks in a target zone → fingerprints', 12, 22);
+  };
+
+  // Stage 6: plot the aligned offset line for the winning song, then reveal the match.
+  root.Renderers.matching = (ctx, d, p, W, H) => {
+    const best = d.results[0];
+    ctx.fillStyle = AX; ctx.font = '15px system-ui';
+    ctx.fillText('time in recording →', 12, H - 10);
+    ctx.save(); ctx.translate(16, H / 2); ctx.rotate(-Math.PI / 2);
+    ctx.fillText('time in matched song →', 0, 0); ctx.restore();
+    if (!best) { ctx.textAlign = 'center'; ctx.fillText('no confident match', W / 2, H / 2); ctx.textAlign = 'left'; return; }
+    const off = best.offset, nT = d.spec.numFrames, shown = Math.floor(nT * p);
+    ctx.fillStyle = FG;
+    for (let tq = 0; tq < shown; tq++) {
+      const x = (tq / nT) * (W - 120) + 60;
+      const y = H - 40 - (((tq + off) / (nT + Math.abs(off))) * (H - 100));
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
+    }
+    if (p >= 1 && d.matchedSong) {
+      ctx.fillStyle = 'rgba(10,10,18,.82)'; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = FG; ctx.font = 'bold 30px system-ui'; ctx.fillText('MATCH', W / 2, H / 2 - 40);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 40px system-ui'; ctx.fillText(d.matchedSong.title, W / 2, H / 2 + 6);
+      ctx.fillStyle = '#9a9ac8'; ctx.font = '24px system-ui';
+      ctx.fillText(`${d.matchedSong.artist}   ·   ${best.score} votes`, W / 2, H / 2 + 48);
+      ctx.textAlign = 'left';
+    }
+  };
 })(typeof self !== 'undefined' ? self : this);
