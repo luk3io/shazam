@@ -78,6 +78,9 @@
     return {
       play() {
         ac = new Ctx();
+        // A freshly created AudioContext can start "suspended" under the browser's
+        // autoplay policy; resume() (safe to call from the click handler) makes it audible.
+        if (ac.state === 'suspended' && ac.resume) ac.resume();
         const b = ac.createBuffer(1, pcm.length, sr);
         b.copyToChannel(pcm, 0);
         node = ac.createBufferSource(); node.buffer = b;
