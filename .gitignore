@@ -1,0 +1,9 @@
+# Source audio — copyrighted, swappable, kept local only
+/songs/
+
+# Generated single-file demo (embeds the copyrighted audio)
+/shazam-demo.html
+/dist/
+
+# Node
+node_modules/
