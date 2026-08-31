@@ -8,6 +8,8 @@
   const HOT = ['#0a0a12', '#1a1a4a', '#4b2bff', '#ff5bd0', '#ffd24b', '#ffffff'];
   const heat = v => HOT[Math.round(Math.max(0, Math.min(0.999, v)) * (HOT.length - 1))];
   const COMP_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b'];
+  // Distinct hues so each anchor peak's fan of fingerprint connections reads as one group.
+  const ANCHOR_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b', '#5bd0ff', '#b98cff', '#9aff6b', '#ff6b8c', '#6be0ff'];
 
   // Faint time × frequency reference grid, drawn over the spectrogram cells.
   function drawGrid(ctx, W, H, cols = 16, rows = 8) {
@@ -56,7 +58,7 @@
   root.Renderers.fourier = (ctx, d, p, W, H) => {
     const frame = D.CONFIG.frameSize, sr = d.sr, start = d.focusFrame * D.CONFIG.hopSize;
     const pad = 40, n = d.pcm.length, inner = W - 2 * pad;
-    const mmH = H * 0.16, sliceTop = mmH + 26, sliceH = H * 0.20;
+    const mmH = H * 0.16, sliceTop = mmH + 46, sliceH = H * 0.20;
     // --- minimap: the whole recording, with the analysed slice highlighted ---
     ctx.strokeStyle = '#2f6f63'; ctx.lineWidth = 1; ctx.beginPath();
     for (let x = 0; x <= inner; x++) {
@@ -78,7 +80,7 @@
     ctx.stroke();
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
     ctx.fillText(`this ~${Math.round(frame / sr * 1000)} ms slice =`, pad, sliceTop - 4);
-    ctx.fillText('a sum of sine waves:', pad, sliceTop + sliceH + 20);
+    ctx.fillText('a sum of sine waves — the bar shows how much of each frequency:', pad, sliceTop + sliceH + 20);
     // --- FFT the windowed slice, pick the strongest few components ---
     const win = D.hann(frame), re = new Float64Array(frame), im = new Float64Array(frame);
     for (let i = 0; i < frame; i++) { re[i] = (d.pcm[start + i] || 0) * win[i]; im[i] = 0; }
@@ -88,18 +90,27 @@
     comps.sort((a, b) => b.mag - a.mag);
     const K = 5, top = comps.slice(0, K), maxMag = (top[0] && top[0].mag > 0) ? top[0].mag : 1;
     const rowsTop = sliceTop + sliceH + 34, rowH = (H - rowsTop) / K;
+    const gutter = 220, sineW = inner - gutter;   // reserve a right-hand strip for amplitude bars
+    const gx = pad + sineW + 20, barMax = gutter - 100;
+    ctx.fillStyle = AX; ctx.font = '13px system-ui';
+    ctx.fillText('frequency · amount', gx, rowsTop - 8);
     const shown = Math.max(1, Math.round(K * p));
     for (let k = 0; k < shown; k++) {
       const c = top[k], f = c.b * sr / frame, amp = c.mag / maxMag, cy = rowsTop + rowH * (k + 0.5);
+      // the pure sine (its height also scales with amplitude)
       ctx.strokeStyle = COMP_COLORS[k % COMP_COLORS.length]; ctx.lineWidth = 1.5; ctx.beginPath();
-      for (let xx = 0; xx <= inner; xx++) {
-        const tt = (xx / inner) * (frame / sr);
+      for (let xx = 0; xx <= sineW; xx++) {
+        const tt = (xx / sineW) * (frame / sr);
         const y = cy + Math.sin(2 * Math.PI * f * tt + c.phase) * amp * (rowH * 0.4);
         xx ? ctx.lineTo(pad + xx, y) : ctx.moveTo(pad + xx, y);
       }
       ctx.stroke();
+      // frequency label + amplitude bar: how much of THIS frequency is present, vs the others
       ctx.fillStyle = AX; ctx.font = '13px system-ui';
-      ctx.fillText(`${Math.round(f)} Hz`, W - pad - 62, cy - rowH * 0.28);
+      ctx.fillText(`${Math.round(f)} Hz`, gx, cy - 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(gx, cy + 3, barMax, 9);
+      ctx.fillStyle = COMP_COLORS[k % COMP_COLORS.length]; ctx.fillRect(gx, cy + 3, barMax * amp, 9);
+      ctx.fillStyle = AX; ctx.fillText(`${Math.round(amp * 100)}%`, gx + barMax + 8, cy + 12);
     }
   };
 
@@ -150,37 +161,50 @@
     ctx.fillText('strongest peaks light up, then the rest fades → constellation map', 12, 22);
   };
 
-  // Stage 5: draw target-zone pairing lines from a few anchors, and show one packed hash.
+  // Stage 5: each anchor peak (in its own colour) fans out to peaks in its target zone. The
+  // connections reveal one-by-one, accelerating, grouped by anchor so each fan reads as a unit.
   root.Renderers.fingerprints = (ctx, d, p, W, H) => {
     const nT = d.spec.numFrames, nB = d.spec.numBins;
-    ctx.fillStyle = '#ffd24b';
-    for (const pk of d.peaks) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 2.5, 0, 7); ctx.fill(); }
-    // Build the pairing connections once, then reveal them one-by-one, accelerating (slow → fast).
-    let segs = d.__fpSegs;
-    if (!segs) {
-      segs = [];
+    // Build anchors + their connection segments once (segments grouped by anchor, each tagged ai).
+    let fp = d.__fp;
+    if (!fp) {
       const anchors = d.peaks.filter((_, i) => i % 25 === 0).slice(0, 14);
-      for (const a of anchors) for (const b of d.peaks) {
-        const dt = b.t - a.t;
-        if (dt >= D.CONFIG.targetZoneMinDt && dt <= D.CONFIG.targetZoneMaxDt && Math.abs(b.f - a.f) <= D.CONFIG.targetZoneFreqRange) segs.push([a, b]);
-      }
-      d.__fpSegs = segs;
+      const anchorSet = new Set(anchors), segs = [];
+      const sorted = [...d.peaks].sort((a, b) => a.t - b.t || a.f - b.f);
+      anchors.forEach((a, ai) => { // mirror fingerprint(): up to `fanout` targets per anchor
+        let paired = 0;
+        for (const b of sorted) {
+          if (paired >= D.CONFIG.fanout) break;
+          const dt = b.t - a.t;
+          if (dt < D.CONFIG.targetZoneMinDt) continue;
+          if (dt > D.CONFIG.targetZoneMaxDt) break;
+          if (Math.abs(b.f - a.f) > D.CONFIG.targetZoneFreqRange) continue;
+          segs.push([a, b, ai]); paired++;
+        }
+      });
+      fp = d.__fp = { anchors, anchorSet, segs };
     }
-    const shown = Math.floor(p * p * segs.length); // p*p = ease-in: slow at first, then speeding up
-    ctx.strokeStyle = FG; ctx.lineWidth = 1.5;
+    const { anchors, anchorSet, segs } = fp;
+    // non-anchor peaks: dim dots
+    ctx.fillStyle = 'rgba(255,210,75,0.45)';
+    for (const pk of d.peaks) { if (!anchorSet.has(pk)) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 2, 0, 7); ctx.fill(); } }
+    // connections, coloured per anchor, revealed one-by-one accelerating (p*p = ease-in)
+    const shown = Math.floor(p * p * segs.length);
+    ctx.lineWidth = 1.5;
     for (let i = 0; i < shown; i++) {
-      const a = segs[i][0], b = segs[i][1];
+      const a = segs[i][0], b = segs[i][1], ai = segs[i][2];
+      ctx.strokeStyle = ANCHOR_COLORS[ai % ANCHOR_COLORS.length];
       ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
     }
-    if (shown > 0) { // emphasise the connection most recently added
-      const a = segs[shown - 1][0], b = segs[shown - 1][1];
-      ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
-    }
+    // anchor points on top, each in its own colour
+    anchors.forEach((a, ai) => {
+      ctx.fillStyle = ANCHOR_COLORS[ai % ANCHOR_COLORS.length];
+      ctx.beginPath(); ctx.arc(px(a.t, nT, W), py(a.f, nB, H), 4.5, 0, 7); ctx.fill();
+    });
     ctx.fillStyle = '#e8e8f0'; ctx.font = '18px system-ui';
     if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText('pair peaks in a target zone → fingerprints', 12, 22);
+    ctx.fillText('each coloured anchor pairs with peaks in its target zone → fingerprints', 12, 22);
   };
 
   // Stage 6: plot the aligned offset line for the winning song, then reveal the match.
