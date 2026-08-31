@@ -7,7 +7,7 @@
     sampleRate: 11025, frameSize: 1024, hopSize: 512,
     peakNeighborhoodTime: 3, peakNeighborhoodFreq: 3, peaksPerFrameCap: 5,
     targetZoneMinDt: 1, targetZoneMaxDt: 63, targetZoneFreqRange: 200,
-    fanout: 8, minScore: 5,
+    fanout: 12, minScore: 5,
   };
 
   // In-place iterative radix-2 Cooley–Tukey FFT. re/im are mutated to hold the transform.
