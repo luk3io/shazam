@@ -177,11 +177,14 @@
   function precompute(pcm) {
     const spec = D.stft(pcm), peaks = D.findPeaks(spec), fps = D.fingerprint(peaks);
     const detail = D.matchDetail(fps, db);
-    const results = detail.results, best = results[0];
-    const matchedSong = (best && best.score >= D.CONFIG.minScore)
-      ? (root.SONGS.find(s => s.id === best.songId) || null) : null;
+    const results = detail.results, best = results[0], runnerUp = results[1];
+    // Confident only if the winning spike clears the floor AND clearly stands out above the next song
+    // (a genuine match spikes far above the scatter; noise/absent audio produces a low, flat field).
+    const confident = !!(best && best.score >= D.CONFIG.minScore && best.score >= 3 * (runnerUp ? runnerUp.score : 0));
+    const bestGuessSong = best ? (root.SONGS.find(s => s.id === best.songId) || null) : null;
+    const matchedSong = confident ? bestGuessSong : null; // reveal a MATCH only when confident
     const focusFrame = Math.max(0, Math.floor(spec.numFrames / 2)); // slice Stage 2/3 share
-    stageData = { pcm, sr: D.CONFIG.sampleRate, spec, peaks, fingerprints: fps, results, matchDetail: detail, songs: root.SONGS, matchedSong, focusFrame };
+    stageData = { pcm, sr: D.CONFIG.sampleRate, spec, peaks, fingerprints: fps, results, matchDetail: detail, songs: root.SONGS, matchedSong, bestGuessSong, confident, focusFrame };
   }
   function enterPipeline() {
     $('start').classList.add('hidden'); $('controls').classList.remove('hidden');

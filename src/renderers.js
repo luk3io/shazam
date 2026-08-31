@@ -418,6 +418,27 @@
       ly += 24;
     }
 
+    // ---------------- voter breakdown: what the recording's fingerprints did ----------------
+    if (det.totalFps) {
+      const aligned = best ? best.score : 0;
+      const scattered = Math.max(0, (det.shelfHits || 0) - aligned); // found a shelf, wrong offset/song
+      const noCat = det.noShelf || 0, total = det.totalFps;           // hash not in the catalog → no vote
+      let by = ly + 16;
+      ctx.fillStyle = '#e8e8f0'; ctx.font = 'bold 17px system-ui';
+      ctx.fillText(`${total} fingerprints (voters) in the recording:`, cX, by); by += 22;
+      const barY = by, barH = 22;
+      const parts = [
+        { v: aligned, c: colorFor(best && best.songId), t: `aligned on the match (${aligned})` },
+        { v: scattered, c: '#5a5a6a', t: `scattered — found a shelf, wrong offset (${scattered})` },
+        { v: noCat, c: '#26263a', t: `found nothing in the catalog — no vote (${noCat})` },
+      ];
+      let sx = cX;
+      for (const pt of parts) { const w = (pt.v / total) * cW; if (w > 0) { ctx.fillStyle = pt.c; ctx.fillRect(sx, barY, Math.max(1, w), barH); } sx += w; }
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1; ctx.strokeRect(cX, barY, cW, barH);
+      by = barY + barH + 22; ctx.font = '15px system-ui';
+      for (const pt of parts) { ctx.fillStyle = pt.c; ctx.fillRect(cX, by - 12, 13, 13); ctx.fillStyle = '#9a9ac8'; ctx.fillText(pt.t, cX + 19, by); by += 22; }
+    }
+
     // ---------------- reveal (keeps shelves + chart visible) ----------------
     if (p >= 1) {
       const bannerY = cY + 2;
@@ -430,10 +451,17 @@
         ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist}`, cW - 20), cX + 10, bannerY + 22);
         ctx.font = 'bold 17px system-ui';
         ctx.fillText(fitText(ctx, `${best.score} votes · recording started ~${startStr} into the song`, cW - 20), cX + 10, bannerY + 42);
+      } else if (d.bestGuessSong && best) {
+        // spike didn't clearly stand out → not confident; show Not found + the closest guess anyway
+        ctx.fillStyle = '#3a2f1a'; ctx.fillRect(cX, bannerY, cW, 52);
+        ctx.fillStyle = '#ffd24b'; ctx.font = 'bold 22px system-ui';
+        ctx.fillText('✗ Not found in the catalog', cX + 10, bannerY + 22);
+        ctx.font = 'bold 17px system-ui';
+        ctx.fillText(fitText(ctx, `closest guess: ${d.bestGuessSong.title} — only ${best.score} aligned votes`, cW - 20), cX + 10, bannerY + 42);
       } else {
         ctx.fillStyle = '#3a1a1a'; ctx.fillRect(cX, bannerY, cW, 34);
         ctx.fillStyle = '#ff8a8a'; ctx.font = 'bold 20px system-ui';
-        ctx.fillText(best ? `No confident match (top only ${best.score} votes)` : 'No candidate votes', cX + 10, bannerY + 22);
+        ctx.fillText('No candidate votes at all', cX + 10, bannerY + 22);
       }
     }
   };

@@ -144,14 +144,17 @@
   // books on it: {songId, time-in-song}) for the matching-stage visualisation.
   function matchDetail(queryFps, db, cfg = CONFIG) {
     const votes = new Map(); // songId -> Map(offset -> count)
+    let shelfHits = 0; // query fingerprints whose hash exists in the catalog (cast a vote)
     for (const { hash, t } of queryFps) {
-      const arr = db.get(hash); if (!arr) continue;
+      const arr = db.get(hash); if (!arr) continue; // no shelf for this hash → the voter casts nothing
+      shelfHits++;
       for (const { songId, t: td } of arr) {
         const offset = td - t;
         let m = votes.get(songId); if (!m) { m = new Map(); votes.set(songId, m); }
         m.set(offset, (m.get(offset) || 0) + 1);
       }
     }
+    const totalFps = queryFps.length, noShelf = totalFps - shelfHits;
     const results = [];
     for (const [songId, m] of votes) {
       let best = 0, bestOff = 0;
@@ -188,7 +191,7 @@
     // 2) fill remaining slots with the most-varied shelves overall (most different other songs)
     for (const c of [...cands].sort(byVariety)) { if (chosen.length >= want) break; if (!has(c.hash)) chosen.push(c); }
     const examples = chosen.map(c => ({ hash: c.hash, tq: c.tq, books: c.books }));
-    return { results, votes, examples };
+    return { results, votes, examples, totalFps, shelfHits, noShelf };
   }
 
   const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint, buildDatabase, matchQuery, matchDetail };
