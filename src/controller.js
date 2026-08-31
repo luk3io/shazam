@@ -49,6 +49,7 @@
   ];
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null;
+  let fpMode = 'spread', fpAnim = null; // fingerprints view: 'spread' (all fans) or 'sequential' (sweep)
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -100,19 +101,42 @@
   function updatePlayBtn() {
     $('playBtn').classList.toggle('hidden', stageIdx !== 0 || !stageData);
   }
+  // Fingerprints "View" toggle (only on Stage 5): Spread (all fans) vs Sweep (one anchor at a time).
+  function updateFpBtn() {
+    const b = $('fpModeBtn');
+    b.classList.toggle('hidden', stageIdx !== 4);
+    b.textContent = fpMode === 'sequential' ? '⇄ View: Sweep' : '⇄ View: Spread';
+  }
+  // Sequential sweep: loop an anchor through the peaks in time order, fanning from each in turn.
+  function fpSweepLoop() {
+    cancelAnimationFrame(fpAnim);
+    const PERIOD = 6000; let start = null;
+    const tick = now => {
+      if (stageIdx !== 4 || fpMode !== 'sequential' || !stageData) return;
+      if (start === null) start = now;
+      stageData.fpPhase = ((now - start) % PERIOD) / PERIOD;
+      draw(1);
+      fpAnim = requestAnimationFrame(tick);
+    };
+    fpAnim = requestAnimationFrame(tick);
+  }
+  function replayStage() { (stageIdx === 4 && fpMode === 'sequential') ? fpSweepLoop() : animateStage(); }
   function showStage(i) {
     const wasStage0 = stageIdx === 0;
+    cancelAnimationFrame(fpAnim); // stop any fingerprints sweep when the stage changes
     stageIdx = Math.max(0, Math.min(STAGES.length - 1, i));
     if (wasStage0 && stageIdx !== 0) stopPlayback();
-    updatePlayBtn();
+    updatePlayBtn(); updateFpBtn();
     canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize' : 'default'; // slice is draggable
     $('caption').textContent = STAGES[stageIdx][1];
-    renderTracker(); animateStage();
+    if (stageData) stageData.fpMode = fpMode;
+    renderTracker();
+    if (stageIdx === 4 && fpMode === 'sequential') fpSweepLoop(); else animateStage();
   }
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
     stopPlayback();
-    cancelAnimationFrame(anim);
+    cancelAnimationFrame(anim); cancelAnimationFrame(fpAnim);
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
@@ -216,15 +240,16 @@
       startPlayheadLoop();
     };
     $('homeBtn').onclick = () => goHome();
+    $('fpModeBtn').onclick = () => { fpMode = (fpMode === 'spread') ? 'sequential' : 'spread'; showStage(stageIdx); };
     $('nextBtn').onclick = () => showStage(stageIdx + 1);
     $('prevBtn').onclick = () => showStage(stageIdx - 1);
-    $('replayBtn').onclick = () => animateStage();
+    $('replayBtn').onclick = () => replayStage();
     document.addEventListener('keydown', e => {
       if (!$('start').classList.contains('hidden')) return; // ignore keys on start screen
       if (!stageData) return; // ignore keys before precompute finishes (e.g. during live listening)
       if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); showStage(stageIdx + 1); }
       else if (e.code === 'ArrowLeft') showStage(stageIdx - 1);
-      else if (e.key.toLowerCase() === 'r') animateStage();
+      else if (e.key.toLowerCase() === 'r') replayStage();
     });
     // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
     // (Stage 2) to move which ~93 ms slice gets analysed.
