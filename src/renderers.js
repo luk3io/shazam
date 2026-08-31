@@ -227,15 +227,48 @@
 
   // Stage 5: each anchor peak (in its own colour) fans out to peaks in its target zone.
   // Two views (toggled by the controller via d.fpMode):
-  //   'spread'      — all ~40 anchors' fans revealed at once (accelerating one-by-one).
-  //   'sequential'  — a single anchor sweeps through the peaks in time order (d.fpPhase drives it),
-  //                   fanning from each in turn with a fading trail: every peak is an anchor.
+  //   'spread' — ~40 sampled anchors; click a pairing line to inspect its (f₁, f₂, Δt, hash).
+  //   'all'    — every peak is an anchor (the full fingerprint set), coloured per anchor.
   root.Renderers.fingerprints = (ctx, d, p, W, H) => {
     const nT = d.spec.numFrames, nB = d.spec.numBins;
-    // Build ~40 anchors (sorted by time) each with up to `fanout` target peaks, once.
+
+    if (d.fpMode === 'all') {
+      // Every peak is an anchor, fanning to up to `fanout` targets (mirrors fingerprint()).
+      let all = d.__fpAll;
+      if (!all) {
+        const sorted = [...d.peaks].sort((a, b) => a.t - b.t || a.f - b.f);
+        all = [];
+        for (let ai = 0; ai < sorted.length; ai++) {
+          const a = sorted[ai]; let paired = 0;
+          for (let j = ai + 1; j < sorted.length && paired < D.CONFIG.fanout; j++) {
+            const b = sorted[j], dt = b.t - a.t;
+            if (dt < D.CONFIG.targetZoneMinDt) continue;
+            if (dt > D.CONFIG.targetZoneMaxDt) break;
+            if (Math.abs(b.f - a.f) > D.CONFIG.targetZoneFreqRange) continue;
+            all.push([a, b, ai]); paired++;
+          }
+        }
+        d.__fpAll = all;
+      }
+      const shown = Math.floor(p * p * all.length);
+      ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+      for (let i = 0; i < shown; i++) {
+        const s = all[i]; ctx.strokeStyle = ANCHOR_COLORS[s[2] % ANCHOR_COLORS.length];
+        ctx.beginPath(); ctx.moveTo(px(s[0].t, nT, W), py(s[0].f, nB, H)); ctx.lineTo(px(s[1].t, nT, W), py(s[1].f, nB, H)); ctx.stroke();
+      }
+      ctx.globalAlpha = 1; ctx.fillStyle = '#ffd24b';
+      for (const pk of d.peaks) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 1.5, 0, 7); ctx.fill(); }
+      ctx.fillStyle = AX; ctx.font = '15px system-ui';
+      ctx.fillText(`every peak is an anchor — all ${all.length} fingerprints`, 12, 22);
+      ctx.fillStyle = '#e8e8f0'; ctx.font = '18px system-ui';
+      if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
+      return;
+    }
+
+    // --- Spread view (clickable) ---
     let fans = d.__fpFans;
     if (!fans) {
-      const step = Math.max(1, Math.floor(d.peaks.length / 40)); // real Shazam: every peak is an anchor
+      const step = Math.max(1, Math.floor(d.peaks.length / 40));
       const chosen = d.peaks.filter((_, i) => i % step === 0).slice(0, 40).sort((a, b) => a.t - b.t || a.f - b.f);
       const sorted = [...d.peaks].sort((a, b) => a.t - b.t || a.f - b.f);
       fans = chosen.map((a, ai) => {
@@ -253,38 +286,36 @@
       d.__fpFans = fans;
       d.__fpAnchorSet = new Set(fans.map(f => f.a));
     }
-    const anchorSet = d.__fpAnchorSet;
-    // non-anchor peaks: dim dots for context
+    if (!d.fpSegments) d.fpSegments = fans.flatMap(f => f.targets.map(b => ({ a: f.a, b, ai: f.ai }))); // for click hit-testing
+    const segs = d.fpSegments, anchorSet = d.__fpAnchorSet;
     ctx.fillStyle = 'rgba(255,210,75,0.35)';
     for (const pk of d.peaks) { if (!anchorSet.has(pk)) { ctx.beginPath(); ctx.arc(px(pk.t, nT, W), py(pk.f, nB, H), 2, 0, 7); ctx.fill(); } }
-
-    const drawFan = (f, alpha, lw) => {
-      const col = ANCHOR_COLORS[f.ai % ANCHOR_COLORS.length], ax = px(f.a.t, nT, W), ay = py(f.a.f, nB, H);
-      ctx.globalAlpha = alpha; ctx.strokeStyle = col; ctx.lineWidth = lw;
-      for (const b of f.targets) { ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke(); }
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(ax, ay, alpha >= 1 ? 6 : 4.5, 0, 7); ctx.fill();
-      ctx.globalAlpha = 1;
-    };
-
-    if (d.fpMode === 'sequential') {
-      const cur = Math.min(fans.length - 1, Math.floor((d.fpPhase || 0) * fans.length)), TRAIL = 6;
-      for (let k = Math.max(0, cur - TRAIL); k < cur; k++) drawFan(fans[k], 0.12 + 0.5 * ((k - (cur - TRAIL)) / TRAIL), 1.2);
-      drawFan(fans[cur], 1, 2.5); // the current anchor, bright
-      ctx.fillStyle = AX; ctx.font = '15px system-ui';
-      ctx.fillText('every peak is an anchor — each one fans out in turn', 12, 22);
-    } else {
-      const segs = d.__fpSegs || (d.__fpSegs = fans.flatMap(f => f.targets.map(b => [f.a, b, f.ai])));
-      const shown = Math.floor(p * p * segs.length); // ease-in: slow first, then speeding up
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i < shown; i++) {
-        const a = segs[i][0], b = segs[i][1];
-        ctx.strokeStyle = ANCHOR_COLORS[segs[i][2] % ANCHOR_COLORS.length];
-        ctx.beginPath(); ctx.moveTo(px(a.t, nT, W), py(a.f, nB, H)); ctx.lineTo(px(b.t, nT, W), py(b.f, nB, H)); ctx.stroke();
-      }
-      fans.forEach(f => { ctx.fillStyle = ANCHOR_COLORS[f.ai % ANCHOR_COLORS.length]; ctx.beginPath(); ctx.arc(px(f.a.t, nT, W), py(f.a.f, nB, H), 4.5, 0, 7); ctx.fill(); });
-      ctx.fillStyle = AX; ctx.font = '15px system-ui';
-      ctx.fillText('each coloured anchor pairs with peaks in its target zone → fingerprints', 12, 22);
+    const shown = Math.floor(p * p * segs.length); // ease-in reveal
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < shown; i++) {
+      const s = segs[i]; ctx.strokeStyle = ANCHOR_COLORS[s.ai % ANCHOR_COLORS.length];
+      ctx.beginPath(); ctx.moveTo(px(s.a.t, nT, W), py(s.a.f, nB, H)); ctx.lineTo(px(s.b.t, nT, W), py(s.b.f, nB, H)); ctx.stroke();
     }
+    fans.forEach(f => { ctx.fillStyle = ANCHOR_COLORS[f.ai % ANCHOR_COLORS.length]; ctx.beginPath(); ctx.arc(px(f.a.t, nT, W), py(f.a.f, nB, H), 4.5, 0, 7); ctx.fill(); });
+    // selected fingerprint: highlight + info panel
+    const sel = d.fpSelected;
+    if (sel) {
+      const ax = px(sel.a.t, nT, W), ay = py(sel.a.f, nB, H), bx = px(sel.b.t, nT, W), by = py(sel.b.f, nB, H);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ax, ay, 5, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(bx, by, 5, 0, 7); ctx.fill();
+      const pw = 252, ph = 118, pxx = W - pw - 16, pyy = 42;
+      ctx.fillStyle = 'rgba(10,10,18,0.92)'; ctx.fillRect(pxx, pyy, pw, ph);
+      ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 1.5; ctx.strokeRect(pxx, pyy, pw, ph);
+      ctx.fillStyle = '#e8e8f0'; ctx.font = 'bold 14px system-ui'; ctx.fillText('this fingerprint', pxx + 12, pyy + 22);
+      ctx.font = '13px system-ui'; ctx.fillStyle = '#c8c8e0';
+      ctx.fillText(`f₁ (start freq): ${sel.f1} Hz`, pxx + 12, pyy + 46);
+      ctx.fillText(`f₂ (end freq):  ${sel.f2} Hz`, pxx + 12, pyy + 66);
+      ctx.fillText(`Δt (time gap):  ${sel.dtMs} ms`, pxx + 12, pyy + 86);
+      ctx.fillStyle = '#4be0c0'; ctx.font = 'bold 14px system-ui';
+      ctx.fillText(`hash 0x${sel.hash.toString(16)}`, pxx + 12, pyy + 108);
+    }
+    ctx.fillStyle = AX; ctx.font = '15px system-ui';
+    ctx.fillText('each coloured anchor pairs with peaks in its target zone — click a line to inspect', 12, 22);
     ctx.fillStyle = '#e8e8f0'; ctx.font = '18px system-ui';
     if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
   };

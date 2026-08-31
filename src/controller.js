@@ -49,7 +49,7 @@
   ];
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null;
-  let fpMode = 'spread', fpAnim = null; // fingerprints view: 'spread' (all fans) or 'sequential' (sweep)
+  let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -65,6 +65,7 @@
   }
   function draw(progress) {
     const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
+    ctx.textAlign = 'left'; ctx.globalAlpha = 1; // reset any state a previous stage's renderer left
     if (!stageData) return; // nothing to render (e.g. after returning to the start screen)
     (root.Renderers[STAGES[stageIdx][0]] || (() => {}))(ctx, stageData, progress, W, H);
   }
@@ -101,42 +102,55 @@
   function updatePlayBtn() {
     $('playBtn').classList.toggle('hidden', stageIdx !== 0 || !stageData);
   }
-  // Fingerprints "View" toggle (only on Stage 5): Spread (all fans) vs Sweep (one anchor at a time).
+  // Fingerprints "View" toggle (only on Stage 5): Spread (~40 anchors) vs All (every fingerprint).
   function updateFpBtn() {
     const b = $('fpModeBtn');
     b.classList.toggle('hidden', stageIdx !== 4);
-    b.textContent = fpMode === 'sequential' ? '⇄ View: Sweep' : '⇄ View: Spread';
+    b.textContent = fpMode === 'all' ? '⇄ View: All' : '⇄ View: Spread';
   }
-  // Sequential sweep: loop an anchor through the peaks in time order, fanning from each in turn.
-  function fpSweepLoop() {
-    cancelAnimationFrame(fpAnim);
-    const PERIOD = 6000; let start = null;
-    const tick = now => {
-      if (stageIdx !== 4 || fpMode !== 'sequential' || !stageData) return;
-      if (start === null) start = now;
-      stageData.fpPhase = ((now - start) % PERIOD) / PERIOD;
-      draw(1);
-      fpAnim = requestAnimationFrame(tick);
-    };
-    fpAnim = requestAnimationFrame(tick);
+  // Distance from point (px,py) to segment (x1,y1)-(x2,y2), for clicking a fingerprint line.
+  function distToSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
+    let t = l2 ? ((px - x1) * dx + (py - y1) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
-  function replayStage() { (stageIdx === 4 && fpMode === 'sequential') ? fpSweepLoop() : animateStage(); }
+  // Click a fingerprint (Spread view only): find the nearest pairing line and show its details.
+  function inspectFingerprint(e) {
+    const segs = stageData && stageData.fpSegments; if (!segs) return;
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const nT = stageData.spec.numFrames, nB = stageData.spec.numBins, W = r.width, H = r.height;
+    const PX = t => (t / nT) * W, PY = f => H - (f / nB) * H;
+    let bestD = 9, best = null;
+    for (const s of segs) {
+      const dd = distToSeg(mx, my, PX(s.a.t), PY(s.a.f), PX(s.b.t), PY(s.b.f));
+      if (dd < bestD) { bestD = dd; best = s; }
+    }
+    if (best) {
+      const a = best.a, b = best.b, sr = stageData.sr, fs = D.CONFIG.frameSize, hop = D.CONFIG.hopSize, dt = b.t - a.t;
+      stageData.fpSelected = {
+        a, b, f1: Math.round(a.f * sr / fs), f2: Math.round(b.f * sr / fs),
+        dtMs: Math.round(dt * hop / sr * 1000),
+        hash: (((a.f & 0x1FF) << 23) | ((b.f & 0x1FF) << 14) | (dt & 0x3FFF)) >>> 0,
+      };
+    } else stageData.fpSelected = null;
+    draw(1);
+  }
   function showStage(i) {
     const wasStage0 = stageIdx === 0;
-    cancelAnimationFrame(fpAnim); // stop any fingerprints sweep when the stage changes
     stageIdx = Math.max(0, Math.min(STAGES.length - 1, i));
     if (wasStage0 && stageIdx !== 0) stopPlayback();
     updatePlayBtn(); updateFpBtn();
-    canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize' : 'default'; // slice is draggable
+    canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize'
+      : (stageIdx === 4 && fpMode === 'spread') ? 'crosshair' : 'default';
     $('caption').textContent = STAGES[stageIdx][1];
-    if (stageData) stageData.fpMode = fpMode;
-    renderTracker();
-    if (stageIdx === 4 && fpMode === 'sequential') fpSweepLoop(); else animateStage();
+    if (stageData) { stageData.fpMode = fpMode; stageData.fpSelected = null; }
+    renderTracker(); animateStage();
   }
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
     stopPlayback();
-    cancelAnimationFrame(anim); cancelAnimationFrame(fpAnim);
+    cancelAnimationFrame(anim);
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
@@ -248,16 +262,16 @@
       startPlayheadLoop();
     };
     $('homeBtn').onclick = () => goHome();
-    $('fpModeBtn').onclick = () => { fpMode = (fpMode === 'spread') ? 'sequential' : 'spread'; showStage(stageIdx); };
+    $('fpModeBtn').onclick = () => { fpMode = (fpMode === 'spread') ? 'all' : 'spread'; showStage(stageIdx); };
     $('nextBtn').onclick = () => showStage(stageIdx + 1);
     $('prevBtn').onclick = () => showStage(stageIdx - 1);
-    $('replayBtn').onclick = () => replayStage();
+    $('replayBtn').onclick = () => animateStage();
     document.addEventListener('keydown', e => {
       if (!$('start').classList.contains('hidden')) return; // ignore keys on start screen
       if (!stageData) return; // ignore keys before precompute finishes (e.g. during live listening)
       if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); showStage(stageIdx + 1); }
       else if (e.code === 'ArrowLeft') showStage(stageIdx - 1);
-      else if (e.key.toLowerCase() === 'r') replayStage();
+      else if (e.key.toLowerCase() === 'r') animateStage();
     });
     // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
     // (Stage 2) to move which ~93 ms slice gets analysed.
@@ -285,6 +299,7 @@
     }
     canvas.addEventListener('mousedown', e => {
       if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; cancelAnimationFrame(anim); applyFocus(e); }
+      else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
     });
     canvas.addEventListener('mousemove', e => { if (dragging) applyFocus(e); });
     window.addEventListener('mouseup', () => { dragging = false; });
