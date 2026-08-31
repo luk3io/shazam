@@ -69,15 +69,21 @@
     const srcNode = ac.createMediaStreamSource(stream);
     const analyser = ac.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
     srcNode.connect(analyser);
+    // Keep the context's graph active: an AnalyserNode with no path to the destination gets
+    // suspended by the browser after a few seconds (freezing the live meter). Route it through a
+    // muted gain so it stays running without anything being heard.
+    const keepAlive = ac.createGain(); keepAlive.gain.value = 0;
+    analyser.connect(keepAlive); keepAlive.connect(ac.destination);
     const win = new Float32Array(analyser.fftSize);
     let raf = 0;
     const poll = () => {
+      if (ac.state === 'suspended' && ac.resume) ac.resume(); // re-wake if the browser suspended it
       analyser.getFloatTimeDomainData(win);
       if (onWindow) onWindow(win);
       if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
       raf = requestAnimationFrame(poll);
     };
-    rec.start(); poll();
+    rec.start(1000); poll(); // flush the recording every second so a mid-capture hiccup loses ≤1s
     await new Promise(r => setTimeout(r, seconds * 1000));
     cancelAnimationFrame(raf);
     rec.stop(); await stopped;
