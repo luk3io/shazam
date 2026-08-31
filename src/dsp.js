@@ -183,8 +183,8 @@
     }
     const want = 5, chosen = [], has = h => chosen.some(c => c.hash === h);
     const byVariety = (a, b) => (b.otherSongs - a.otherSongs) || (b.books.length - a.books.length);
-    // 1) the two most-varied shelves that also hold the correct book (guaranteed highlighted books)
-    for (const c of cands.filter(c => c.winHits > 0).sort(byVariety)) { if (chosen.filter(x => x.winHits > 0).length >= 2) break; chosen.push(c); }
+    // 1) the three most-varied shelves that also hold the correct book (guaranteed highlighted books)
+    for (const c of cands.filter(c => c.winHits > 0).sort(byVariety)) { if (chosen.filter(x => x.winHits > 0).length >= 3) break; chosen.push(c); }
     // 2) fill remaining slots with the most-varied shelves overall (most different other songs)
     for (const c of [...cands].sort(byVariety)) { if (chosen.length >= want) break; if (!has(c.hash)) chosen.push(c); }
     const examples = chosen.map(c => ({ hash: c.hash, tq: c.tq, books: c.books }));

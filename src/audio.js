@@ -75,18 +75,25 @@
     const keepAlive = ac.createGain(); keepAlive.gain.value = 0;
     analyser.connect(keepAlive); keepAlive.connect(ac.destination);
     const win = new Float32Array(analyser.fftSize);
-    let raf = 0;
+    // Poll on a timer, NOT requestAnimationFrame: rAF gets throttled/paused in some situations
+    // (which froze the live meter). setInterval keeps updating reliably in the foreground.
     const poll = () => {
       if (ac.state === 'suspended' && ac.resume) ac.resume(); // re-wake if the browser suspended it
       analyser.getFloatTimeDomainData(win);
       if (onWindow) onWindow(win);
       if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
-      raf = requestAnimationFrame(poll);
     };
-    rec.start(1000); poll(); // flush the recording every second so a mid-capture hiccup loses ≤1s
-    await new Promise(r => setTimeout(r, seconds * 1000));
-    cancelAnimationFrame(raf);
-    rec.stop(); await stopped;
+    rec.start(1000); const timer = setInterval(poll, 40); poll(); // flush the recording every second
+    // Wait the full time, but stop early if the OS/browser drops the mic track (analyse what we got).
+    const track = stream.getAudioTracks()[0];
+    await new Promise(res => {
+      const done = () => res();
+      const to = setTimeout(done, seconds * 1000);
+      if (track) track.addEventListener('ended', () => { clearTimeout(to); done(); });
+    });
+    clearInterval(timer);
+    try { rec.stop(); } catch (e) {}
+    await stopped;
     try { srcNode.disconnect(); ac.close(); } catch (e) {}
     stream.getTracks().forEach(t => t.stop());
     return decodeToMono(await new Blob(blobs).arrayBuffer()); // decode the recording -> mono PCM @ DSP rate

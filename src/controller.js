@@ -195,20 +195,20 @@
       const v = Math.max(0, Math.min(1, level));
       const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
     };
-    // Live "recording" waveform: append the peak of each analyser window into a growing envelope,
-    // drawn left-to-right as the capture proceeds (shape/level only — the matched audio is the
-    // MediaRecorder recording returned below).
-    const env = [], expectedFrames = 10 * 60; // ~60 fps over the 10 s capture, for x mapping
+    // Live "recording" waveform, mapped by REAL elapsed time with a progress cursor, so it always
+    // advances left-to-right even if the audio analyser stalls (the matched audio is the MediaRecorder
+    // recording returned below, regardless of the meter).
+    const env = [], t0 = performance.now();
     const onWindow = w => {
       let pk = 0; for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
-      env.push(pk);
+      const frac = Math.min(1, (performance.now() - t0) / 10000);
+      env.push({ frac, pk });
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
       const mid = H / 2;
       ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 2;
-      for (let i = 0; i < env.length; i++) {
-        const x = Math.min(W, (i / expectedFrames) * W), h = env[i] * mid * 0.95;
-        ctx.beginPath(); ctx.moveTo(x, mid - h); ctx.lineTo(x, mid + h); ctx.stroke();
-      }
+      for (const e of env) { const x = e.frac * W, h = e.pk * mid * 0.95; ctx.beginPath(); ctx.moveTo(x, mid - h); ctx.lineTo(x, mid + h); ctx.stroke(); }
+      const cx = frac * W; // progress cursor makes it obvious the recording is still going
+      ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
       ctx.fillStyle = '#6a6a88'; ctx.font = '16px system-ui'; ctx.fillText('🔴 recording…', 16, 28);
     };
     let pcm;
