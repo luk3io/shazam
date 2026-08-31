@@ -44,59 +44,119 @@
     return pcm.slice(a, b);
   }
 
-  // Record from the mic, streaming blocks to onChunk for live drawing. Resolves with the
-  // full recording resampled to the DSP rate.
-  // Record from the mic. The authoritative recording is captured with MediaRecorder (which taps the
-  // MediaStream directly and reliably records the full window), while a live waveform/level is driven
-  // from an AnalyserNode. We deliberately avoid ScriptProcessorNode: with a live mic it stops
-  // delivering audio after ~0.5 s in Chrome (the recording goes flat while the buffer keeps redrawing).
-  // onWindow receives the current time-domain window (Float32Array) each animation frame.
-  async function captureMicStreaming(seconds, onWindow, onLevel) {
+  // --- Microphone ---
+  // The whole capture pipeline is built ONCE by enableMic() and kept warm & running: the mic stream,
+  // an AudioContext, a MediaStreamSource, an AnalyserNode for the live meter, and a silent keep-alive.
+  // Recording (captureMicStreaming) then only attaches a MediaRecorder to the already-settled stream.
+  //
+  // Why warm it up first: when the mic first opens, Windows/Chrome spend ~1-2 s reconfiguring the
+  // audio pipeline (device warm-up, echo-cancel/AGC negotiation), during which the captured audio
+  // briefly drops to silence and then recovers. If recording started at that moment, the dropout
+  // landed inside the recording (the reported "silent for ~1 s near the start" bug). By enabling the
+  // mic as a separate step, that settling happens BEFORE the timed window, so the recording is clean.
+  let mic = null; // { stream, ac, srcNode, analyser, keepAlive, win }
+
+  // Acquire the mic. We leave automatic gain control ON: the demo captures a song playing across the
+  // room from a separate device, which reaches the mic very quietly, and AGC boosts that to a usable
+  // level *at capture* — far cleaner than amplifying a near-noise-floor recording afterward. (AGC was
+  // originally disabled to chase a mid-recording dropout, but that turned out to be the mic warm-up
+  // glitch, which enabling the mic as a separate step now handles.) Echo cancellation and noise
+  // suppression stay OFF — they're tuned for speech and distort/gate music. getSettings() is returned
+  // so the caller can show what the browser actually applied.
+  async function enableMic() {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true },
     });
-    // Authoritative recording via MediaRecorder (independent of the Web Audio graph).
+    const Ctx = root.AudioContext || root.webkitAudioContext;
+    const ac = new Ctx();
+    if (ac.state === 'suspended' && ac.resume) { try { await ac.resume(); } catch (e) {} }
+    const srcNode = ac.createMediaStreamSource(stream);
+    const analyser = ac.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
+    srcNode.connect(analyser); // NOTE: analyser is NOT connected onward — the mic never reaches an output.
+    // Keep the context rendering (so the analyser keeps updating) WITHOUT routing the mic to the
+    // destination — a DC source at zero gain, independent of the mic. Routing the mic itself toward an
+    // output can flip Windows/Chrome into "communications" processing that silences a loud input.
+    let keepAlive = null;
+    try {
+      keepAlive = ac.createConstantSource();
+      const ka = ac.createGain(); ka.gain.value = 0;
+      keepAlive.connect(ka); ka.connect(ac.destination); keepAlive.start();
+    } catch (e) { keepAlive = null; } // ConstantSourceNode unavailable: analyser usually still updates
+    mic = { stream, ac, srcNode, analyser, keepAlive, win: new Float32Array(analyser.fftSize) };
+    const track = stream.getAudioTracks()[0];
+    return { settings: track && track.getSettings ? track.getSettings() : {} };
+  }
+  const micReady = () => !!mic;
+  function stopMic() {
+    if (!mic) return;
+    try { if (mic.keepAlive) mic.keepAlive.stop(); mic.srcNode.disconnect(); mic.analyser.disconnect(); mic.ac.close(); } catch (e) {}
+    mic.stream.getTracks().forEach(t => t.stop());
+    mic = null;
+  }
+
+  // Record `seconds` from the warm mic pipeline (enableMic must have run). The authoritative audio is
+  // captured with MediaRecorder tapping the MediaStream track directly; the live waveform/level is
+  // read from the already-running AnalyserNode. onWindow receives the current time-domain window.
+  async function captureMicStreaming(seconds, onWindow, onLevel) {
+    if (!mic) throw Object.assign(new Error('microphone not enabled'), { name: 'NotReadableError' });
+    const { stream, analyser, win } = mic;
     const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
       .find(t => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t));
     const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     const blobs = [];
     rec.ondataavailable = e => { if (e.data && e.data.size) blobs.push(e.data); };
     const stopped = new Promise(res => { rec.onstop = res; });
-    // Live waveform + level via AnalyserNode (reliable across the whole capture).
-    const Ctx = root.AudioContext || root.webkitAudioContext;
-    const ac = new Ctx();
-    if (ac.state === 'suspended' && ac.resume) { try { await ac.resume(); } catch (e) {} }
-    const srcNode = ac.createMediaStreamSource(stream);
-    const analyser = ac.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
-    srcNode.connect(analyser);
-    // Keep the context's graph active: an AnalyserNode with no path to the destination gets
-    // suspended by the browser after a few seconds (freezing the live meter). Route it through a
-    // muted gain so it stays running without anything being heard.
-    const keepAlive = ac.createGain(); keepAlive.gain.value = 0;
-    analyser.connect(keepAlive); keepAlive.connect(ac.destination);
-    const win = new Float32Array(analyser.fftSize);
     // Poll on a timer, NOT requestAnimationFrame: rAF gets throttled/paused in some situations
     // (which froze the live meter). setInterval keeps updating reliably in the foreground.
     const poll = () => {
-      if (ac.state === 'suspended' && ac.resume) ac.resume(); // re-wake if the browser suspended it
       analyser.getFloatTimeDomainData(win);
       if (onWindow) onWindow(win);
       if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
     };
     rec.start(1000); const timer = setInterval(poll, 40); poll(); // flush the recording every second
-    // Wait the full time, but stop early if the OS/browser drops the mic track (analyse what we got).
-    const track = stream.getAudioTracks()[0];
-    await new Promise(res => {
-      const done = () => res();
-      const to = setTimeout(done, seconds * 1000);
-      if (track) track.addEventListener('ended', () => { clearTimeout(to); done(); });
-    });
+    await new Promise(res => setTimeout(res, seconds * 1000));
     clearInterval(timer);
     try { rec.stop(); } catch (e) {}
     await stopped;
-    try { srcNode.disconnect(); ac.close(); } catch (e) {}
-    stream.getTracks().forEach(t => t.stop());
+    // Release the mic the instant recording ends. While a mic is open, Windows keeps the audio
+    // session in "communications" mode and DUCKS other output — which silenced the Play-clip
+    // playback during the stages. We already have the recorded blob, so the mic is no longer needed.
+    stopMic();
     return decodeToMono(await new Blob(blobs).arrayBuffer()); // decode the recording -> mono PCM @ DSP rate
+  }
+
+  // Even up a recording's loudness over time so a mic that fades on a sustained song (Windows driver
+  // AGC, which we can't disable from JS) and a generally-quiet capture both come back to a consistent,
+  // audible level. We target a constant short-time RMS: divide each moment by its smoothed RMS envelope
+  // (a ~0.4 s window) toward a target level. RMS (not peak) means slow fades are flattened without the
+  // gain chasing transient clicks — that click-chasing is what made an earlier peak-based version sound
+  // scratchy. A per-sample hard limit prevents clipping. Purely cosmetic/audible: the fingerprint
+  // peak-picker is per-frame relative, so matching is unaffected.
+  function normalizeRecording(pcm, sr = SR(), opts = {}) {
+    const n = pcm.length;
+    if (!n) return pcm;
+    const targetRMS = opts.targetRMS || 0.14, maxGain = opts.maxGain || 10, ceiling = opts.ceiling || 0.97;
+    const winSamp = Math.max(1, Math.floor((opts.windowSec || 0.4) * sr));
+    const hop = Math.max(1, Math.floor(winSamp / 8)), nb = Math.ceil(n / hop);
+    // Short-time RMS envelope (each block averages over ~winSamp centred-ish on the block start).
+    const rms = new Float32Array(nb);
+    for (let b = 0; b < nb; b++) {
+      const a0 = b * hop, a1 = Math.min(n, a0 + winSamp); let s = 0, c = 0;
+      for (let i = a0; i < a1; i++) { s += pcm[i] * pcm[i]; c++; }
+      rms[b] = c ? Math.sqrt(s / c) : 0;
+    }
+    let maxR = 0; for (let b = 0; b < nb; b++) if (rms[b] > maxR) maxR = rms[b];
+    if (maxR === 0) return pcm.slice(); // pure silence: nothing to lift
+    const floor = Math.max(maxR * (opts.floorFrac || 0.12), 1e-4); // don't boost near-silence to full target
+    // Per-sample gain = min(maxGain, targetRMS / envRMS), interpolated between block centres; hard-limited.
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const bf = i / hop, b0 = Math.min(nb - 1, Math.floor(bf)), b1 = Math.min(nb - 1, b0 + 1), f = bf - b0;
+      const e = Math.max(floor, rms[b0] + (rms[b1] - rms[b0]) * f);
+      let v = pcm[i] * Math.min(maxGain, targetRMS / e);
+      out[i] = v > ceiling ? ceiling : (v < -ceiling ? -ceiling : v);
+    }
+    return out;
   }
 
   function makeSource(pcm, sr = SR()) {
@@ -121,5 +181,5 @@
     };
   }
 
-  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, captureMicStreaming, makeSource };
+  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, micReady, stopMic, captureMicStreaming, normalizeRecording, makeSource };
 })(typeof self !== 'undefined' ? self : this);

@@ -20,6 +20,7 @@ button { font-size: 21px; padding: 12px 22px; border: 0; border-radius: 10px;
   background: #2b2bff; color: #fff; cursor: pointer; font-weight: 600; }
 button:disabled { opacity: .5; cursor: default; }
 button.secondary { background: #23233a; }
+#recordBtn { background: #d23b3b; }
 #start { position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 22px; background: #0a0a12; z-index: 10; }
 #start h1 { font-size: 42px; } #start .modes { display: flex; gap: 20px; align-items: center; }

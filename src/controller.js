@@ -161,11 +161,16 @@
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
     stopPlayback();
+    IO.stopMic();
     cancelAnimationFrame(anim);
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
     $('homeBtn').classList.add('hidden');
+    // Reset the live flow back to step 1 (mic released → must be re-enabled).
+    $('recordBtn').classList.add('hidden');
+    $('modeLive').classList.remove('hidden'); $('modeLive').disabled = false;
+    $('status').textContent = db ? 'Ready ✓' : 'Preparing song database…';
     updatePlayBtn();
     $('caption').textContent = '';
     const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
@@ -192,6 +197,43 @@
     showStage(0);
   }
 
+  // Step 1 of the live flow: turn on the mic as its own action. This gets the one-time permission
+  // prompt out of the way and — crucially — lets the mic/OS audio pipeline settle for a moment
+  // BEFORE the timed recording, so its ~1-2 s warm-up glitch never lands inside the recording.
+  // The mic's *actual* settings are shown so we can confirm the browser really disabled AGC etc.
+  async function enableMicFlow() {
+    $('modeLive').disabled = true;
+    $('status').textContent = 'Enabling microphone…';
+    try {
+      const { settings } = await IO.enableMic();
+      const b = v => v === undefined ? '?' : (v ? 'ON' : 'off');
+      $('status').textContent = 'Mic ready ✓ — give it a second, then Record. ' +
+        `(AGC ${b(settings.autoGainControl)}, echo-cancel ${b(settings.echoCancellation)}, ` +
+        `noise-suppress ${b(settings.noiseSuppression)}` + (settings.sampleRate ? `, ${settings.sampleRate} Hz)` : ')');
+      $('modeLive').classList.add('hidden');
+      $('recordBtn').classList.remove('hidden');
+    } catch (err) {
+      $('modeLive').disabled = false;
+      $('status').textContent = 'Microphone unavailable: ' + (err.name || err.message);
+      alert('Microphone unavailable (' + (err.name || err.message) + '). Use Chrome/Edge and allow mic access, or use Canned playback.');
+    }
+  }
+
+  // Diagnostic: print the recording's per-second RMS loudness so a mid-recording dropout is visible
+  // as numbers in the console (open DevTools with F12). Also stashed on window.__recordingRMS.
+  function logRecordingRMS(pcm, label) {
+    const sr = D.CONFIG.sampleRate, secs = Math.max(1, Math.ceil(pcm.length / sr)), rows = [];
+    for (let s = 0; s < secs; s++) {
+      const a = s * sr, b = Math.min(pcm.length, a + sr); let sum = 0;
+      for (let i = a; i < b; i++) sum += pcm[i] * pcm[i];
+      rows.push(b > a ? Math.sqrt(sum / (b - a)) : 0);
+    }
+    const bar = v => { const k = Math.max(0, Math.min(24, Math.round(v * 480))); return '#'.repeat(k) + '.'.repeat(24 - k); };
+    console.log(`%cLive recording (${label || 'raw'}) — RMS loudness per second:`, 'font-weight:bold');
+    rows.forEach((v, i) => console.log(`  ${String(i).padStart(2)}s  ${v.toFixed(4)}  ${bar(v)}`));
+    root['__recordingRMS_' + (label || 'raw')] = rows;
+  }
+
   // --- Live mode: draw the waveform in real time while recording ---
   async function runLive() {
     stageData = null; // close the keyboard-gate gap: a stale prior stageData would let
@@ -209,22 +251,25 @@
       const v = Math.max(0, Math.min(1, level));
       const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
     };
-    // Live "recording" waveform, mapped by REAL elapsed time with a progress cursor, so it always
-    // advances left-to-right even if the audio analyser stalls (the matched audio is the MediaRecorder
-    // recording returned below, regardless of the meter).
-    const env = []; let t0 = null;
+    // Live recording waveform: accumulate the captured samples and draw them as a real sample LINE —
+    // identical in style to the Stage 1 recorded waveform (not a filled envelope) — filling left→right
+    // over the 10 s window. Gaps between analyser polls don't matter to how the waveform reads.
+    const recBuf = new Float32Array(600000); let wp = 0, t0 = null;
     const onWindow = w => {
-      if (t0 === null) t0 = performance.now(); // start the clock at the first sample, not before getUserMedia/setup
-      let pk = 0; for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
+      if (t0 === null) t0 = performance.now(); // start the clock at the first sample, not before mic setup
+      for (let i = 0; i < w.length && wp < recBuf.length; i++) recBuf[wp++] = w[i];
       const frac = Math.min(1, (performance.now() - t0) / 10000);
-      env.push({ frac, pk });
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
-      const mid = H / 2;
-      ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 2;
-      for (const e of env) { const x = e.frac * W, h = e.pk * mid * 0.95; ctx.beginPath(); ctx.moveTo(x, mid - h); ctx.lineTo(x, mid + h); ctx.stroke(); }
-      const cx = frac * W; // progress cursor makes it obvious the recording is still going
-      ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
-      ctx.fillStyle = '#6a6a88'; ctx.font = '20px system-ui'; ctx.fillText('🔴 recording…', 16, 28);
+      const mid = H / 2, amp = mid * 0.9;
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1; // faint centre line
+      ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+      const fillW = Math.max(1, Math.round(frac * W));
+      ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 1.5; ctx.beginPath(); // same look/colour as Renderers.waveform
+      for (let x = 0; x <= fillW; x++) {
+        const i = Math.min(wp - 1, Math.floor((x / fillW) * wp)), v = recBuf[i] || 0;
+        x ? ctx.lineTo(x, mid + v * amp) : ctx.moveTo(x, mid + v * amp);
+      }
+      ctx.stroke();
     };
     let pcm;
     try {
@@ -235,6 +280,9 @@
       $('levelMeter').classList.add('hidden');
     }
     $('caption').textContent = 'Analysing…';
+    logRecordingRMS(pcm, 'raw');            // diagnostic: shows the mic's droop/quietness
+    pcm = IO.normalizeRecording(pcm);       // flatten the slow gain fade + lift quiet captures
+    logRecordingRMS(pcm, 'normalized');     // diagnostic: should be flat + louder
     await dbReady;
     precompute(pcm);
     $('controls').classList.remove('hidden');
@@ -243,6 +291,7 @@
   }
 
   async function runCanned() {
+    IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
     await dbReady;
     const s = root.SONGS.find(x => x.id === $('songSelect').value) || root.SONGS[0];
     precompute(IO.sliceSeconds(s._pcm, 30, 10));
@@ -263,9 +312,10 @@
       .catch(err => { $('status').textContent = 'Database error: ' + err.message; });
 
     $('modeCanned').onclick = () => runCanned();
-    $('modeLive').onclick = () => runLive().catch(err => {
+    $('modeLive').onclick = () => enableMicFlow();
+    $('recordBtn').onclick = () => runLive().catch(err => {
       $('start').classList.remove('hidden'); $('controls').classList.add('hidden');
-      alert('Microphone unavailable (' + err.name + '). Use Chrome/Edge, allow mic access, or use Canned playback.');
+      alert('Recording failed (' + (err.name || err.message) + '). Re-enable the microphone or use Canned playback.');
     });
     $('fsBtn').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
     $('playBtn').onclick = () => {
