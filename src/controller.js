@@ -47,8 +47,9 @@
     ['fingerprints', 'Pair peaks into hashes: (f₁, f₂, Δt) → a 32-bit fingerprint.'],
     ['matching',     'Votes for the same song at the same time-offset reveal the match.'],
   ];
+  const STAGE_SUBSTEPS = [1, 1, 2, 1, 1, 2]; // spectrogram (2) and matching (2) reveal over two Next presses
   const $ = id => document.getElementById(id);
-  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null;
+  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
@@ -144,8 +145,18 @@
     canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize'
       : (stageIdx === 4 && fpMode === 'spread') ? 'crosshair' : 'default';
     $('caption').textContent = STAGES[stageIdx][1];
-    if (stageData) { stageData.fpMode = fpMode; stageData.fpSelected = null; }
+    subStep = 0;
+    if (stageData) { stageData.fpMode = fpMode; stageData.fpSelected = null; stageData.subStep = 0; }
     renderTracker(); animateStage();
+  }
+  // Next/Prev advance an internal sub-step first (for stages that reveal in two presses), then the stage.
+  function nextStep() {
+    if (subStep < (STAGE_SUBSTEPS[stageIdx] || 1) - 1) { subStep++; if (stageData) stageData.subStep = subStep; animateStage(); }
+    else showStage(stageIdx + 1);
+  }
+  function prevStep() {
+    if (subStep > 0) { subStep--; if (stageData) stageData.subStep = subStep; animateStage(); }
+    else showStage(stageIdx - 1);
   }
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
@@ -210,7 +221,7 @@
       for (const e of env) { const x = e.frac * W, h = e.pk * mid * 0.95; ctx.beginPath(); ctx.moveTo(x, mid - h); ctx.lineTo(x, mid + h); ctx.stroke(); }
       const cx = frac * W; // progress cursor makes it obvious the recording is still going
       ctx.strokeStyle = '#ffd24b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
-      ctx.fillStyle = '#6a6a88'; ctx.font = '16px system-ui'; ctx.fillText('🔴 recording…', 16, 28);
+      ctx.fillStyle = '#6a6a88'; ctx.font = '20px system-ui'; ctx.fillText('🔴 recording…', 16, 28);
     };
     let pcm;
     try {
@@ -264,14 +275,14 @@
     };
     $('homeBtn').onclick = () => goHome();
     $('fpModeBtn').onclick = () => { fpMode = (fpMode === 'spread') ? 'all' : 'spread'; showStage(stageIdx); };
-    $('nextBtn').onclick = () => showStage(stageIdx + 1);
-    $('prevBtn').onclick = () => showStage(stageIdx - 1);
+    $('nextBtn').onclick = () => nextStep();
+    $('prevBtn').onclick = () => prevStep();
     $('replayBtn').onclick = () => animateStage();
     document.addEventListener('keydown', e => {
       if (!$('start').classList.contains('hidden')) return; // ignore keys on start screen
       if (!stageData) return; // ignore keys before precompute finishes (e.g. during live listening)
-      if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); showStage(stageIdx + 1); }
-      else if (e.code === 'ArrowLeft') showStage(stageIdx - 1);
+      if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); nextStep(); }
+      else if (e.code === 'ArrowLeft') prevStep();
       else if (e.key.toLowerCase() === 'r') animateStage();
     });
     // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
