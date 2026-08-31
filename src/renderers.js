@@ -120,7 +120,10 @@
     const cols = d.spec.columns, nT = d.spec.numFrames, nB = d.spec.numBins;
     let max = d.__specMax;
     if (!max) { max = 1e-9; for (const c of cols) for (let b = 0; b < nB; b++) if (c[b] > max) max = c[b]; d.__specMax = max; }
-    const cw = W / nT, ch = H / nB, focus = d.focusFrame, reach = Math.round(nT * p);
+    const cw = W / nT, ch = H / nB, focus = d.focusFrame;
+    // Stage 3 holds on the focus column first (so its frequencies register), then expands outward.
+    const revealP = hideFocus ? p : Math.max(0, (p - 0.25) / 0.75);
+    const reach = Math.round(nT * revealP);
     const lo = Math.max(0, focus - reach), hi = Math.min(nT - 1, focus + reach);
     for (let t = lo; t <= hi; t++) {
       const c = cols[t];
@@ -131,10 +134,35 @@
       }
     }
     drawGrid(ctx, W, H); // faint reference grid over the spectrogram (Stage 3 and behind Stage 4)
-    if (!hideFocus) { // the Stage-2 slice column + its caption (skipped when Stage 4 reuses this)
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(focus * cw - 1, 0, cw + 2, H);
+    if (!hideFocus) { // the Stage-2 slice column, emphasised then blended into the full spectrogram
+      const emph = Math.max(0, 1 - Math.max(0, p - 0.25) / 0.5); // hold, then fade by p≈0.75
+      const fx = focus * cw, colW = Math.max(cw, 6);
+      if (emph > 0.02) {
+        const col = cols[focus];
+        // brighten the focus column so its frequencies read as "the Fourier result being placed"
+        for (let b = 0; b < nB; b++) {
+          const v = Math.log1p(col[b]) / Math.log1p(max);
+          if (v < 0.06) continue;
+          ctx.globalAlpha = emph; ctx.fillStyle = heat(Math.min(0.999, v * 1.3));
+          ctx.fillRect(fx - (colW - cw) / 2, H - (b + 1) * ch, colW, ch + 1);
+        }
+        // mark the strongest frequencies (matching Stage 2's components), fading out
+        const comps = []; for (let b = 1; b < nB; b++) comps.push({ b, m: col[b] });
+        comps.sort((a, b) => b.m - a.m);
+        for (let k = 0; k < 5 && k < comps.length; k++) {
+          const b = comps[k].b, y = H - (b / nB) * H, hz = Math.round(b * d.sr / D.CONFIG.frameSize);
+          ctx.globalAlpha = emph; ctx.strokeStyle = COMP_COLORS[k % COMP_COLORS.length]; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(fx - 14, y); ctx.lineTo(fx + colW + 14, y); ctx.stroke();
+          ctx.fillStyle = COMP_COLORS[k % COMP_COLORS.length]; ctx.font = '12px system-ui';
+          ctx.fillText(`${hz} Hz`, fx + colW + 18, y + 4);
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(fx - 1, 0, cw + 2, H);
       ctx.fillStyle = AX; ctx.font = '15px system-ui';
-      ctx.fillText('the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
+      ctx.fillText(emph > 0.25
+        ? 'the Fourier result for this slice → placed as one column…'
+        : 'the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
     }
     ctx.fillStyle = AX; ctx.font = '15px system-ui';
     ctx.fillText('frequency ↑', 10, H - 12); ctx.fillText('time →', W - 60, H - 12);

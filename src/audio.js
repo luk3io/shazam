@@ -51,7 +51,10 @@
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
     const Ctx = root.AudioContext || root.webkitAudioContext;
-    let ac; try { ac = new Ctx({ sampleRate: SR() }); } catch (e) { ac = new Ctx(); }
+    // Run at the mic's NATIVE rate and resample at the end. Forcing a low sampleRate on a live
+    // mic input makes Chrome's audio pipeline stall after ~1-2 s (the "gives up early" bug).
+    const ac = new Ctx();
+    if (ac.state === 'suspended' && ac.resume) { try { await ac.resume(); } catch (e) {} }
     const src = ac.createMediaStreamSource(stream);
     const proc = ac.createScriptProcessor(2048, 1, 1);
     const mute = ac.createGain(); mute.gain.value = 0; // process without echoing mic to speakers
