@@ -251,24 +251,22 @@
       const v = Math.max(0, Math.min(1, level));
       const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
     };
-    // Live recording waveform: accumulate the captured samples and draw them as a real sample LINE —
-    // identical in style to the Stage 1 recorded waveform (not a filled envelope) — filling left→right
-    // over the 10 s window. Gaps between analyser polls don't matter to how the waveform reads.
-    const recBuf = new Float32Array(600000); let wp = 0, t0 = null;
+    // Live recording waveform: a real sample LINE in the same style as the Stage 1 waveform, filling
+    // left→right over the 10 s. Each poll appends a few samples at their elapsed-time position; those
+    // points are fixed once placed, so the drawn history stays put (no reshuffling/flicker) and only
+    // the right edge advances.
+    const pts = []; let prevFrac = 0, t0 = null;
     const onWindow = w => {
-      if (t0 === null) t0 = performance.now(); // start the clock at the first sample, not before mic setup
-      for (let i = 0; i < w.length && wp < recBuf.length; i++) recBuf[wp++] = w[i];
-      const frac = Math.min(1, (performance.now() - t0) / 10000);
+      if (t0 === null) t0 = performance.now(); // clock starts at the first sample, not before mic setup
+      const frac = Math.min(1, (performance.now() - t0) / 10000), K = 8;
+      for (let k = 0; k < K; k++) pts.push({ f: prevFrac + (k / K) * (frac - prevFrac), v: w[Math.floor((k / K) * w.length)] || 0 });
+      prevFrac = frac;
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
       const mid = H / 2, amp = mid * 0.9;
       ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1; // faint centre line
       ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
-      const fillW = Math.max(1, Math.round(frac * W));
       ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 1.5; ctx.beginPath(); // same look/colour as Renderers.waveform
-      for (let x = 0; x <= fillW; x++) {
-        const i = Math.min(wp - 1, Math.floor((x / fillW) * wp)), v = recBuf[i] || 0;
-        x ? ctx.lineTo(x, mid + v * amp) : ctx.moveTo(x, mid + v * amp);
-      }
+      for (let i = 0; i < pts.length; i++) { const x = pts[i].f * W, y = mid + pts[i].v * amp; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
       ctx.stroke();
     };
     let pcm;
