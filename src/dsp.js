@@ -164,26 +164,29 @@
     // (the winning song at the winning offset) appear across the shown shelves.
     const winner = results[0] ? results[0].songId : null, winOff = results[0] ? results[0].offset : null;
     const isWin = bk => bk.songId === winner && bk.offset === winOff;
+    // Order a shelf's books: the winning book(s) first, then round-robin across the OTHER songs so the
+    // visible books show a VARIETY of songs rather than many of the same one (e.g. all Clocks).
+    const orderBooks = books => {
+      const wins = books.filter(isWin), bySong = new Map();
+      for (const b of books) { if (isWin(b)) continue; if (!bySong.has(b.songId)) bySong.set(b.songId, []); bySong.get(b.songId).push(b); }
+      const groups = [...bySong.values()], rr = [];
+      for (let i = 0, more = true; more; i++) { more = false; for (const g of groups) if (i < g.length) { rr.push(g[i]); more = true; } }
+      return [...wins, ...rr];
+    };
     const cands = [], seen = new Set();
     for (const { hash, t } of queryFps) {
       if (seen.has(hash)) continue; seen.add(hash);
       const arr = db.get(hash); if (!arr || arr.length === 0) continue;
-      const books = arr.map(e => ({ songId: e.songId, tSong: e.t, offset: e.t - t }));
-      books.sort((a, b) => (isWin(b) - isWin(a)) || (a.tSong - b.tSong)); // winning books first (kept visible)
-      cands.push({ hash, tq: t, books, winHits: books.filter(isWin).length });
+      const books = orderBooks(arr.map(e => ({ songId: e.songId, tSong: e.t, offset: e.t - t })));
+      const otherSongs = new Set(books.filter(b => !isWin(b)).map(b => b.songId)).size; // variety of other songs
+      cands.push({ hash, tq: t, books, winHits: books.filter(isWin).length, otherSongs });
     }
     const want = 5, chosen = [], has = h => chosen.some(c => c.hash === h);
-    let winTotal = 0;
-    // 1) richest winner-hitting shelves first, until ≥2 highlighted books and a few shelves are chosen
-    for (const c of [...cands].filter(c => c.winHits > 0).sort((a, b) => b.books.length - a.books.length)) {
-      if (chosen.length >= want) break;
-      chosen.push(c); winTotal += c.winHits;
-      if (winTotal >= 2 && chosen.length >= 3) break;
-    }
-    // 2) if still short of two highlighted books, add more winner-hit shelves regardless of richness
-    if (winTotal < 2) for (const c of cands) { if (winTotal >= 2) break; if (c.winHits > 0 && !has(c.hash)) { chosen.push(c); winTotal += c.winHits; } }
-    // 3) fill remaining slots with the richest shelves overall (diversity of other songs)
-    for (const c of [...cands].sort((a, b) => b.books.length - a.books.length)) { if (chosen.length >= want) break; if (!has(c.hash)) chosen.push(c); }
+    const byVariety = (a, b) => (b.otherSongs - a.otherSongs) || (b.books.length - a.books.length);
+    // 1) the two most-varied shelves that also hold the correct book (guaranteed highlighted books)
+    for (const c of cands.filter(c => c.winHits > 0).sort(byVariety)) { if (chosen.filter(x => x.winHits > 0).length >= 2) break; chosen.push(c); }
+    // 2) fill remaining slots with the most-varied shelves overall (most different other songs)
+    for (const c of [...cands].sort(byVariety)) { if (chosen.length >= want) break; if (!has(c.hash)) chosen.push(c); }
     const examples = chosen.map(c => ({ hash: c.hash, tq: c.tq, books: c.books }));
     return { results, votes, examples };
   }
