@@ -151,12 +151,12 @@
   // Compute every artifact a renderer needs for the given recording PCM, up front.
   function precompute(pcm) {
     const spec = D.stft(pcm), peaks = D.findPeaks(spec), fps = D.fingerprint(peaks);
-    const results = D.matchQuery(fps, db);
-    const best = results[0];
+    const detail = D.matchDetail(fps, db);
+    const results = detail.results, best = results[0];
     const matchedSong = (best && best.score >= D.CONFIG.minScore)
       ? (root.SONGS.find(s => s.id === best.songId) || null) : null;
     const focusFrame = Math.max(0, Math.floor(spec.numFrames / 2)); // slice Stage 2/3 share
-    stageData = { pcm, sr: D.CONFIG.sampleRate, spec, peaks, fingerprints: fps, results, songs: root.SONGS, matchedSong, focusFrame };
+    stageData = { pcm, sr: D.CONFIG.sampleRate, spec, peaks, fingerprints: fps, results, matchDetail: detail, songs: root.SONGS, matchedSong, focusFrame };
   }
   function enterPipeline() {
     $('start').classList.add('hidden'); $('controls').classList.remove('hidden');

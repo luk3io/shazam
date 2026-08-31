@@ -140,7 +140,45 @@
     return results.sort((a, b) => b.score - a.score);
   }
 
-  const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint, buildDatabase, matchQuery };
+  // Like matchQuery, but keeps the full vote breakdown and a few example "shelves" (a hash and the
+  // books on it: {songId, time-in-song}) for the matching-stage visualisation.
+  function matchDetail(queryFps, db, cfg = CONFIG) {
+    const votes = new Map(); // songId -> Map(offset -> count)
+    for (const { hash, t } of queryFps) {
+      const arr = db.get(hash); if (!arr) continue;
+      for (const { songId, t: td } of arr) {
+        const offset = td - t;
+        let m = votes.get(songId); if (!m) { m = new Map(); votes.set(songId, m); }
+        m.set(offset, (m.get(offset) || 0) + 1);
+      }
+    }
+    const results = [];
+    for (const [songId, m] of votes) {
+      let best = 0, bestOff = 0;
+      for (const [off, c] of m) if (c > best) { best = c; bestOff = off; }
+      results.push({ songId, score: best, offset: bestOff });
+    }
+    results.sort((a, b) => b.score - a.score);
+    // Collect small shelves, then sample a few spread across the recording time so the offset
+    // subtraction (in-song time − heard-at time) varies and reads clearly.
+    const cands = [], seen = new Set();
+    for (const { hash, t } of queryFps) {
+      if (seen.has(hash)) continue; seen.add(hash);
+      const arr = db.get(hash);
+      if (!arr || arr.length === 0 || arr.length > 6) continue;
+      cands.push({ hash, tq: t, arr });
+    }
+    cands.sort((a, b) => a.tq - b.tq);
+    const examples = [], want = 5;
+    for (let k = 0; k < want && cands.length; k++) {
+      const c = cands[Math.min(cands.length - 1, Math.round((k + 0.5) * cands.length / want))];
+      if (examples.some(e => e.hash === c.hash)) continue;
+      examples.push({ hash: c.hash, tq: c.tq, books: c.arr.map(e => ({ songId: e.songId, tSong: e.t, offset: e.t - c.tq })) });
+    }
+    return { results, votes, examples };
+  }
+
+  const DSP = { CONFIG, fft, hann, stft, findPeaks, fingerprint, buildDatabase, matchQuery, matchDetail };
   if (typeof module !== 'undefined' && module.exports) module.exports = DSP;
   else root.DSP = DSP;
 })(typeof self !== 'undefined' ? self : this);

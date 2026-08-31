@@ -170,6 +170,13 @@
 
   const px = (t, nT, W) => (t / nT) * W;
   const py = (f, nB, H) => H - (f / nB) * H;
+  // Truncate text with an ellipsis so it fits within maxW (uses the current ctx.font).
+  function fitText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return t + '…';
+  }
 
   // Stage 4: keep the spectrogram bright while the peaks light up ON the bright spots, THEN
   // fade the background down — so the constellation is clearly picked out (not everything at once).
@@ -253,35 +260,103 @@
     if (d.fingerprints[0]) ctx.fillText(`(f₁, f₂, Δt) → hash 0x${(d.fingerprints[0].hash >>> 0).toString(16)}`, 12, H - 16);
   };
 
-  // Stage 6: plot the aligned offset line for the winning song, then reveal the match.
+  // Stage 6: the library. LEFT — example shelves (hash values) holding books (song, time-in-song)
+  // with the offset worked out on each. RIGHT — votes by song & time-offset; the match spikes.
   root.Renderers.matching = (ctx, d, p, W, H) => {
-    const best = d.results[0];
-    ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText('time in recording →', 12, H - 10);
-    ctx.save(); ctx.translate(16, H / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText('time in matched song →', 0, 0); ctx.restore();
-    if (!best) { ctx.textAlign = 'center'; ctx.fillText('no confident match', W / 2, H / 2); ctx.textAlign = 'left'; return; }
-    const off = best.offset, nT = d.spec.numFrames, shown = Math.floor(nT * p);
-    ctx.fillStyle = FG;
-    for (let tq = 0; tq < shown; tq++) {
-      const x = (tq / nT) * (W - 120) + 60;
-      const y = H - 40 - (((tq + off) / (nT + Math.abs(off))) * (H - 100));
-      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
-    }
-    if (p >= 1) {
-      ctx.fillStyle = 'rgba(10,10,18,.82)'; ctx.fillRect(0, 0, W, H);
-      ctx.textAlign = 'center';
-      if (d.matchedSong) {
-        ctx.fillStyle = FG; ctx.font = 'bold 30px system-ui'; ctx.fillText('MATCH', W / 2, H / 2 - 40);
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 40px system-ui'; ctx.fillText(d.matchedSong.title, W / 2, H / 2 + 6);
-        ctx.fillStyle = '#9a9ac8'; ctx.font = '24px system-ui';
-        ctx.fillText(`${d.matchedSong.artist}   ·   ${best.score} votes`, W / 2, H / 2 + 48);
-      } else {
-        ctx.fillStyle = '#ff5b5b'; ctx.font = 'bold 30px system-ui'; ctx.fillText('No confident match', W / 2, H / 2 - 10);
-        ctx.fillStyle = '#9a9ac8'; ctx.font = '20px system-ui';
-        ctx.fillText(best ? `top guess only reached ${best.score} votes` : 'no candidate votes at all', W / 2, H / 2 + 30);
+    const det = d.matchDetail || { results: [], votes: new Map(), examples: [] };
+    const best = det.results[0];
+    const songs = d.songs || [];
+    const idx = id => songs.findIndex(s => s.id === id);
+    const colorFor = id => ANCHOR_COLORS[(idx(id) + ANCHOR_COLORS.length) % ANCHOR_COLORS.length];
+    const titleOf = id => { const s = songs.find(x => x.id === id); return s ? s.title : id; };
+    const F2S = fr => fr * D.CONFIG.hopSize / d.sr; // frames -> seconds
+    const midX = Math.round(W * 0.5);
+    const isWinBook = b => best && b.songId === best.songId && b.offset === best.offset;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(midX, 44); ctx.lineTo(midX, H - 20); ctx.stroke();
+
+    // ---------------- LEFT: shelves & books ----------------
+    const LX = 16, LW = midX - 40;
+    ctx.fillStyle = '#e8e8f0'; ctx.font = 'bold 16px system-ui';
+    ctx.fillText('Each hash = a shelf; each book = (song, time in song)', LX, 26);
+    const shelves = det.examples || [];
+    const nSh = shelves.length || 1;
+    const revealSh = Math.min(shelves.length, Math.ceil(shelves.length * Math.min(1, p / 0.45)));
+    const shH = Math.min(150, (H - 70) / nSh);
+    for (let s = 0; s < revealSh; s++) {
+      const sh = shelves[s], y = 48 + s * shH;
+      ctx.fillStyle = '#9a9ac8'; ctx.font = '13px system-ui';
+      ctx.fillText(`shelf  0x${(sh.hash >>> 0).toString(16)}   ·   heard at ${F2S(sh.tq).toFixed(1)}s`, LX, y + 14);
+      // shelf plank
+      ctx.strokeStyle = '#8a7a5a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(LX, y + shH - 14); ctx.lineTo(LX + LW, y + shH - 14); ctx.stroke();
+      // books
+      const bw = 118, gap = 10, bh = shH - 46; let bx = LX + 2;
+      for (const b of sh.books) {
+        if (bx + bw > LX + LW) break;
+        const win = isWinBook(b);
+        ctx.globalAlpha = win ? 1 : 0.55; ctx.fillStyle = colorFor(b.songId);
+        ctx.fillRect(bx, y + 20, bw, bh); ctx.globalAlpha = 1;
+        if (win) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(bx, y + 20, bw, bh); }
+        ctx.fillStyle = '#0a0a12'; ctx.font = 'bold 12px system-ui';
+        ctx.fillText(fitText(ctx, titleOf(b.songId), bw - 12), bx + 6, y + 38);
+        ctx.font = '11px system-ui';
+        ctx.fillText(`in song: ${F2S(b.tSong).toFixed(1)}s`, bx + 6, y + 20 + bh - 24);
+        ctx.fillStyle = win ? '#fff' : '#0a0a12'; ctx.font = 'bold 11px system-ui';
+        ctx.fillText(`offset ${F2S(b.offset).toFixed(1)}s`, bx + 6, y + 20 + bh - 8);
+        bx += bw + gap;
       }
-      ctx.textAlign = 'left';
+    }
+
+    // ---------------- RIGHT: vote chart ----------------
+    const RX = midX + 24, RW = W - RX - 20;
+    ctx.fillStyle = '#e8e8f0'; ctx.font = 'bold 16px system-ui';
+    ctx.fillText('Votes by song & time-offset', RX, 26);
+    // offset range + max count
+    let offMin = Infinity, offMax = -Infinity, maxCount = 1;
+    for (const [, m] of det.votes) for (const [off, c] of m) { if (off < offMin) offMin = off; if (off > offMax) offMax = off; if (c > maxCount) maxCount = c; }
+    if (!isFinite(offMin)) { offMin = 0; offMax = 1; }
+    const cX = RX, cW = RW, cY = 52, cH = Math.max(80, H * 0.42);
+    const eased = Math.min(1, p / 0.9);
+    // axes
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cX, cY + cH); ctx.lineTo(cX + cW, cY + cH); ctx.stroke();
+    // bars: one thin bar per (song, offset)
+    for (const [sid, m] of det.votes) {
+      ctx.fillStyle = colorFor(sid);
+      for (const [off, c] of m) {
+        const x = cX + ((off - offMin) / Math.max(1, offMax - offMin)) * (cW - 6);
+        const bh = (c / maxCount) * cH * eased;
+        ctx.fillRect(x, cY + cH - bh, 3, bh);
+      }
+    }
+    ctx.fillStyle = AX; ctx.font = '13px system-ui';
+    ctx.fillText('time offset →', cX + cW - 96, cY + cH + 18);
+    ctx.save(); ctx.translate(cX - 6, cY + cH / 2 + 20); ctx.rotate(-Math.PI / 2); ctx.fillText('votes', 0, 0); ctx.restore();
+    // per-song tally (votes for each song)
+    let ly = cY + cH + 44;
+    ctx.font = '14px system-ui';
+    for (let i = 0; i < det.results.length && ly < H - 10; i++) {
+      const r = det.results[i], winRow = best && r.songId === best.songId;
+      ctx.fillStyle = colorFor(r.songId); ctx.fillRect(cX, ly - 11, 14, 14);
+      ctx.fillStyle = winRow ? '#fff' : '#9a9ac8'; ctx.font = winRow ? 'bold 15px system-ui' : '14px system-ui';
+      ctx.fillText(`${fitText(ctx, titleOf(r.songId), cW - 140)} — ${Math.round(r.score * eased)} votes`, cX + 22, ly);
+      ly += 24;
+    }
+
+    // ---------------- reveal (keeps shelves + chart visible) ----------------
+    if (p >= 1) {
+      const bannerY = cY + 2, bh2 = 34;
+      if (best && d.matchedSong) {
+        ctx.fillStyle = colorFor(best.songId); ctx.fillRect(cX, bannerY, cW, bh2);
+        ctx.fillStyle = '#0a0a12'; ctx.font = 'bold 18px system-ui';
+        ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist} · ${best.score} votes`, cW - 20), cX + 10, bannerY + 23);
+      } else {
+        ctx.fillStyle = '#3a1a1a'; ctx.fillRect(cX, bannerY, cW, bh2);
+        ctx.fillStyle = '#ff8a8a'; ctx.font = 'bold 16px system-ui';
+        ctx.fillText(best ? `No confident match (top only ${best.score} votes)` : 'No candidate votes', cX + 10, bannerY + 22);
+      }
     }
   };
 })(typeof self !== 'undefined' ? self : this);
