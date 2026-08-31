@@ -351,10 +351,10 @@
       // shelf plank
       ctx.strokeStyle = '#8a7a5a'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(LX, y + shH - 14); ctx.lineTo(LX + LW, y + shH - 14); ctx.stroke();
-      // books
-      const bw = 118, gap = 10, bh = shH - 46; let bx = LX + 2;
+      // books (winning books are sorted first, so they stay visible on rich shelves)
+      const bw = 118, gap = 10, bh = shH - 46; let bx = LX + 2, drawn = 0;
       for (const b of sh.books) {
-        if (bx + bw > LX + LW) break;
+        if (bx + bw + 44 > LX + LW) break; // leave room for a "+N more" note
         const win = isWinBook(b);
         ctx.globalAlpha = win ? 1 : 0.55; ctx.fillStyle = colorFor(b.songId);
         ctx.fillRect(bx, y + 20, bw, bh); ctx.globalAlpha = 1;
@@ -365,7 +365,12 @@
         ctx.fillText(`in song: ${F2S(b.tSong).toFixed(1)}s`, bx + 6, y + 20 + bh - 24);
         ctx.fillStyle = win ? '#fff' : '#0a0a12'; ctx.font = 'bold 11px system-ui';
         ctx.fillText(`offset ${F2S(b.offset).toFixed(1)}s`, bx + 6, y + 20 + bh - 8);
-        bx += bw + gap;
+        bx += bw + gap; drawn++;
+      }
+      if (sh.books.length > drawn) { // this hash holds even more books
+        ctx.fillStyle = '#c8c8e0'; ctx.font = 'bold 13px system-ui';
+        ctx.fillText(`+${sh.books.length - drawn}`, bx + 2, y + 20 + bh / 2 - 2);
+        ctx.font = '10px system-ui'; ctx.fillText('more', bx + 2, y + 20 + bh / 2 + 12);
       }
     }
 
@@ -407,13 +412,18 @@
 
     // ---------------- reveal (keeps shelves + chart visible) ----------------
     if (p >= 1) {
-      const bannerY = cY + 2, bh2 = 34;
+      const bannerY = cY + 2;
       if (best && d.matchedSong) {
-        ctx.fillStyle = colorFor(best.songId); ctx.fillRect(cX, bannerY, cW, bh2);
+        const startSec = Math.max(0, F2S(best.offset)); // the winning offset = where the recording began
+        const mm = Math.floor(startSec / 60), ss = Math.round(startSec % 60);
+        const startStr = mm + ':' + String(ss).padStart(2, '0');
+        ctx.fillStyle = colorFor(best.songId); ctx.fillRect(cX, bannerY, cW, 52);
         ctx.fillStyle = '#0a0a12'; ctx.font = 'bold 18px system-ui';
-        ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist} · ${best.score} votes`, cW - 20), cX + 10, bannerY + 23);
+        ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist}`, cW - 20), cX + 10, bannerY + 22);
+        ctx.font = 'bold 13px system-ui';
+        ctx.fillText(fitText(ctx, `${best.score} votes · recording started ~${startStr} into the song`, cW - 20), cX + 10, bannerY + 42);
       } else {
-        ctx.fillStyle = '#3a1a1a'; ctx.fillRect(cX, bannerY, cW, bh2);
+        ctx.fillStyle = '#3a1a1a'; ctx.fillRect(cX, bannerY, cW, 34);
         ctx.fillStyle = '#ff8a8a'; ctx.font = 'bold 16px system-ui';
         ctx.fillText(best ? `No confident match (top only ${best.score} votes)` : 'No candidate votes', cX + 10, bannerY + 22);
       }
