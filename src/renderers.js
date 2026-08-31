@@ -22,6 +22,33 @@
     ctx.restore();
   }
 
+  // Labelled axes for the spectrogram: frequency (Hz) up the left, time (s) along the bottom.
+  function drawSpectrogramAxes(ctx, W, H, sr, nT) {
+    const nyq = sr / 2, dur = nT * D.CONFIG.hopSize / sr;
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,10,18,0.6)';
+    ctx.fillRect(0, 0, 54, H);            // left strip (behind the frequency labels)
+    ctx.fillRect(54, H - 22, W - 54, 22); // bottom strip (behind the time labels)
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.fillStyle = '#c8c8e0'; ctx.font = '12px system-ui';
+    ctx.textAlign = 'right';
+    for (let hz = 1000; hz <= nyq; hz += 1000) {          // frequency ticks: 1k, 2k, … up to Nyquist
+      const y = H - (hz / nyq) * H; if (y > H - 24) continue;
+      ctx.beginPath(); ctx.moveTo(48, y); ctx.lineTo(54, y); ctx.stroke();
+      ctx.fillText((hz / 1000) + 'k', 45, y + 4);
+    }
+    ctx.textAlign = 'left';
+    const step = dur > 8 ? 2 : 1;
+    for (let s = step; s <= dur + 0.01; s += step) {       // time ticks
+      const x = (s / dur) * W; if (x < 60 || x > W - 22) continue;
+      ctx.beginPath(); ctx.moveTo(x, H - 22); ctx.lineTo(x, H - 16); ctx.stroke();
+      ctx.fillText(s + 's', x + 3, H - 7);
+    }
+    ctx.fillStyle = '#9a9ac8'; ctx.font = 'bold 12px system-ui';
+    ctx.save(); ctx.translate(14, H / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('frequency (Hz)', 0, 0); ctx.restore();
+    ctx.textAlign = 'left'; ctx.fillText('time (s)', W - 64, H - 7);
+    ctx.restore();
+  }
+
   // Stage 1: air pressure over time. Draws d.pcm up to `p` (canned) or the whole buffer (live).
   // Once drawn, highlights the slice Stage 2 will zoom into; while the clip plays, d.playhead
   // (0..1) draws a moving cursor at the current sample.
@@ -122,7 +149,7 @@
     if (!max) { max = 1e-9; for (const c of cols) for (let b = 0; b < nB; b++) if (c[b] > max) max = c[b]; d.__specMax = max; }
     const cw = W / nT, ch = H / nB, focus = d.focusFrame;
     // Stage 3 holds on the focus column first (so its frequencies register), then expands outward.
-    const revealP = hideFocus ? p : Math.max(0, (p - 0.25) / 0.75);
+    const revealP = hideFocus ? p : Math.max(0, (p - 0.35) / 0.65);
     const reach = Math.round(nT * revealP);
     const lo = Math.max(0, focus - reach), hi = Math.min(nT - 1, focus + reach);
     for (let t = lo; t <= hi; t++) {
@@ -135,7 +162,7 @@
     }
     drawGrid(ctx, W, H); // faint reference grid over the spectrogram (Stage 3 and behind Stage 4)
     if (!hideFocus) { // the Stage-2 slice column, emphasised then blended into the full spectrogram
-      const emph = Math.max(0, 1 - Math.max(0, p - 0.25) / 0.5); // hold, then fade by p≈0.75
+      const emph = Math.max(0, 1 - Math.max(0, p - 0.45) / 0.45); // hold the markers longer, fade by p≈0.9
       const fx = focus * cw, colW = Math.max(cw, 6);
       if (emph > 0.02) {
         const col = cols[focus];
@@ -163,9 +190,11 @@
       ctx.fillText(emph > 0.25
         ? 'the Fourier result for this slice → placed as one column…'
         : 'the slice from Stage 2 → one column; the rest stack in around it', 12, 20);
+      drawSpectrogramAxes(ctx, W, H, d.sr, nT); // labelled frequency (Hz) & time (s) axes
+    } else {
+      ctx.fillStyle = AX; ctx.font = '15px system-ui';
+      ctx.fillText('frequency ↑', 10, H - 12); ctx.fillText('time →', W - 60, H - 12);
     }
-    ctx.fillStyle = AX; ctx.font = '15px system-ui';
-    ctx.fillText('frequency ↑', 10, H - 12); ctx.fillText('time →', W - 60, H - 12);
   };
 
   const px = (t, nT, W) => (t / nT) * W;
