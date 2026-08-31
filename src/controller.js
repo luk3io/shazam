@@ -181,18 +181,26 @@
       const v = Math.max(0, Math.min(1, level));
       const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
     };
-    // Live visual buffer: draw raw mic samples as they arrive (shape only — no resampling).
-    // Sized for the worst-case native mic rate so it never overflows during the 10 s capture.
-    const live = new Float32Array(48000 * 11); let filled = 0;
-    const onChunk = chunk => {
-      for (let i = 0; i < chunk.length && filled < live.length; i++) live[filled++] = chunk[i];
+    // Live "recording" waveform: append the peak of each analyser window into a growing envelope,
+    // drawn left-to-right as the capture proceeds (shape/level only — the matched audio is the
+    // MediaRecorder recording returned below).
+    const env = [], expectedFrames = 10 * 60; // ~60 fps over the 10 s capture, for x mapping
+    const onWindow = w => {
+      let pk = 0; for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
+      env.push(pk);
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
-      root.Renderers.waveform(ctx, { pcm: live.subarray(0, filled) }, 1, W, H); // maps across full width
+      const mid = H / 2;
+      ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 2;
+      for (let i = 0; i < env.length; i++) {
+        const x = Math.min(W, (i / expectedFrames) * W), h = env[i] * mid * 0.95;
+        ctx.beginPath(); ctx.moveTo(x, mid - h); ctx.lineTo(x, mid + h); ctx.stroke();
+      }
+      ctx.fillStyle = '#6a6a88'; ctx.font = '16px system-ui'; ctx.fillText('🔴 recording…', 16, 28);
     };
     let pcm;
     try {
-      // captureMicStreaming returns the recording correctly resampled to the DSP rate.
-      pcm = await IO.captureMicStreaming(10, onChunk, onLevel);
+      // captureMicStreaming records via MediaRecorder and returns mono PCM at the DSP rate.
+      pcm = await IO.captureMicStreaming(10, onWindow, onLevel);
     } finally {
       clearInterval(countdown);
       $('levelMeter').classList.add('hidden');

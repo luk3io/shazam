@@ -46,33 +46,44 @@
 
   // Record from the mic, streaming blocks to onChunk for live drawing. Resolves with the
   // full recording resampled to the DSP rate.
-  async function captureMicStreaming(seconds, onChunk, onLevel) {
+  // Record from the mic. The authoritative recording is captured with MediaRecorder (which taps the
+  // MediaStream directly and reliably records the full window), while a live waveform/level is driven
+  // from an AnalyserNode. We deliberately avoid ScriptProcessorNode: with a live mic it stops
+  // delivering audio after ~0.5 s in Chrome (the recording goes flat while the buffer keeps redrawing).
+  // onWindow receives the current time-domain window (Float32Array) each animation frame.
+  async function captureMicStreaming(seconds, onWindow, onLevel) {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
+    // Authoritative recording via MediaRecorder (independent of the Web Audio graph).
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+      .find(t => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t));
+    const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    const blobs = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) blobs.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    // Live waveform + level via AnalyserNode (reliable across the whole capture).
     const Ctx = root.AudioContext || root.webkitAudioContext;
-    // Run at the mic's NATIVE rate and resample at the end. Forcing a low sampleRate on a live
-    // mic input makes Chrome's audio pipeline stall after ~1-2 s (the "gives up early" bug).
     const ac = new Ctx();
     if (ac.state === 'suspended' && ac.resume) { try { await ac.resume(); } catch (e) {} }
-    const src = ac.createMediaStreamSource(stream);
-    const proc = ac.createScriptProcessor(2048, 1, 1);
-    const mute = ac.createGain(); mute.gain.value = 0; // process without echoing mic to speakers
-    const chunks = [];
-    proc.onaudioprocess = e => {
-      const data = e.inputBuffer.getChannelData(0), copy = new Float32Array(data);
-      chunks.push(copy);
-      if (onChunk) onChunk(copy);
-      if (onLevel) { let pk = 0; for (let i = 0; i < copy.length; i++) pk = Math.max(pk, Math.abs(copy[i])); onLevel(pk); }
+    const srcNode = ac.createMediaStreamSource(stream);
+    const analyser = ac.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
+    srcNode.connect(analyser);
+    const win = new Float32Array(analyser.fftSize);
+    let raf = 0;
+    const poll = () => {
+      analyser.getFloatTimeDomainData(win);
+      if (onWindow) onWindow(win);
+      if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
+      raf = requestAnimationFrame(poll);
     };
-    src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
+    rec.start(); poll();
     await new Promise(r => setTimeout(r, seconds * 1000));
-    proc.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
-    const rate = ac.sampleRate; ac.close();
-    // concatenate captured blocks
-    const total = chunks.reduce((s, c) => s + c.length, 0), full = new Float32Array(total);
-    let o = 0; for (const c of chunks) { full.set(c, o); o += c.length; }
-    return resampleLinear(full, rate, SR());
+    cancelAnimationFrame(raf);
+    rec.stop(); await stopped;
+    try { srcNode.disconnect(); ac.close(); } catch (e) {}
+    stream.getTracks().forEach(t => t.stop());
+    return decodeToMono(await new Blob(blobs).arrayBuffer()); // decode the recording -> mono PCM @ DSP rate
   }
 
   function makeSource(pcm, sr = SR()) {
