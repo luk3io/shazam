@@ -9,7 +9,7 @@
   const heat = v => HOT[Math.round(Math.max(0, Math.min(0.999, v)) * (HOT.length - 1))];
   const COMP_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b'];
   // Distinct hues so each anchor peak's fan of fingerprint connections reads as one group.
-  const ANCHOR_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b', '#5bd0ff', '#b98cff', '#9aff6b', '#ff6b8c', '#6be0ff'];
+  const ANCHOR_COLORS = ['#4be0c0', '#ff5bd0', '#ffd24b', '#7b8cff', '#ff8a5b', '#5bd0ff', '#b98cff', '#9aff6b', '#ff6b8c', '#6be0ff', '#ffb14b', '#4bff9a', '#e06bff', '#8cff4b', '#5b9bff', '#ff4b6b'];
 
   // Faint time × frequency reference grid, drawn over the spectrogram cells.
   function drawGrid(ctx, W, H, cols = 16, rows = 8) {
@@ -168,7 +168,8 @@
     // Build anchors + their connection segments once (segments grouped by anchor, each tagged ai).
     let fp = d.__fp;
     if (!fp) {
-      const anchors = d.peaks.filter((_, i) => i % 25 === 0).slice(0, 14);
+      const step = Math.max(1, Math.floor(d.peaks.length / 40)); // ~40 anchors (real Shazam: every peak)
+      const anchors = d.peaks.filter((_, i) => i % step === 0).slice(0, 40);
       const anchorSet = new Set(anchors), segs = [];
       const sorted = [...d.peaks].sort((a, b) => a.t - b.t || a.f - b.f);
       anchors.forEach((a, ai) => { // mirror fingerprint(): up to `fanout` targets per anchor
