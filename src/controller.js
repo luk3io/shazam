@@ -198,8 +198,9 @@
     // Live "recording" waveform, mapped by REAL elapsed time with a progress cursor, so it always
     // advances left-to-right even if the audio analyser stalls (the matched audio is the MediaRecorder
     // recording returned below, regardless of the meter).
-    const env = [], t0 = performance.now();
+    const env = []; let t0 = null;
     const onWindow = w => {
+      if (t0 === null) t0 = performance.now(); // start the clock at the first sample, not before getUserMedia/setup
       let pk = 0; for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
       const frac = Math.min(1, (performance.now() - t0) / 10000);
       env.push({ frac, pk });
