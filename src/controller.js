@@ -226,21 +226,6 @@
     }
   }
 
-  // Diagnostic: print the recording's per-second RMS loudness so a mid-recording dropout is visible
-  // as numbers in the console (open DevTools with F12). Also stashed on window.__recordingRMS.
-  function logRecordingRMS(pcm, label) {
-    const sr = D.CONFIG.sampleRate, secs = Math.max(1, Math.ceil(pcm.length / sr)), rows = [];
-    for (let s = 0; s < secs; s++) {
-      const a = s * sr, b = Math.min(pcm.length, a + sr); let sum = 0;
-      for (let i = a; i < b; i++) sum += pcm[i] * pcm[i];
-      rows.push(b > a ? Math.sqrt(sum / (b - a)) : 0);
-    }
-    const bar = v => { const k = Math.max(0, Math.min(24, Math.round(v * 480))); return '#'.repeat(k) + '.'.repeat(24 - k); };
-    console.log(`%cLive recording (${label || 'raw'}) — RMS loudness per second:`, 'font-weight:bold');
-    rows.forEach((v, i) => console.log(`  ${String(i).padStart(2)}s  ${v.toFixed(4)}  ${bar(v)}`));
-    root['__recordingRMS_' + (label || 'raw')] = rows;
-  }
-
   // --- Live mode: draw the waveform in real time while recording ---
   async function runLive() {
     stageData = null; // close the keyboard-gate gap: a stale prior stageData would let
@@ -285,11 +270,7 @@
       $('levelMeter').classList.add('hidden');
     }
     $('caption').textContent = 'Analysing…';
-    logRecordingRMS(pcm, 'raw');            // diagnostic: shows the mic's droop/quietness
-    if ($('normChk') && $('normChk').checked) {
-      pcm = IO.normalizeRecording(pcm);     // flatten the slow gain fade + lift quiet captures
-      logRecordingRMS(pcm, 'normalized');   // diagnostic: should be flat + louder
-    }
+    if ($('normChk') && $('normChk').checked) pcm = IO.normalizeRecording(pcm); // flatten fade + lift quiet captures
     await dbReady;
     precompute(pcm);
     $('controls').classList.remove('hidden');
