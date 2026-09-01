@@ -531,8 +531,8 @@
           </tr>
           <tr>
             <td><code>src/audio.js</code></td>
-            <td>Browser audio I/O: decoding embedded MP3s to mono PCM, slicing clips, streaming microphone capture, and playback. Web Audio only runs on the main thread, so all of this lives here rather than in the worker.</td>
-            <td><code>AudioIO.decodeToMono</code>, <code>base64ToArrayBuffer</code>, <code>sliceSeconds</code>, <code>resampleLinear</code>, <code>captureMicStreaming</code>, <code>makeSource</code></td>
+            <td>Browser audio I/O: decoding embedded MP3s to mono PCM, slicing clips, warming up and streaming microphone capture, evening out the recording level, and playback. Web Audio only runs on the main thread, so all of this lives here rather than in the worker.</td>
+            <td><code>AudioIO.decodeToMono</code>, <code>base64ToArrayBuffer</code>, <code>sliceSeconds</code>, <code>resampleLinear</code>, <code>enableMic</code>, <code>stopMic</code>, <code>captureMicStreaming</code>, <code>normalizeRecording</code>, <code>makeSource</code></td>
           </tr>
           <tr>
             <td><code>src/worker.js</code></td>
@@ -546,8 +546,8 @@
           </tr>
           <tr>
             <td><code>src/controller.js</code></td>
-            <td>The app's state machine: loads the song database in the background via the worker, handles mode selection (live / canned), precomputes every stage's data up front, drives the animation clock, and wires up keyboard/button controls.</td>
-            <td><code>App.loadDatabase</code>, <code>showStage</code>, <code>precompute</code>, <code>runLive</code>, <code>runCanned</code>, keyboard handling (Space/→/←/R)</td>
+            <td>The app's state machine: loads the song database in the background via the worker, handles mode selection (enable-mic → live record / canned), precomputes every stage's data up front, drives the animation and playback clocks, and wires up keyboard/button controls.</td>
+            <td><code>App.loadDatabase</code>, <code>showStage</code>, <code>precompute</code>, <code>enableMicFlow</code>, <code>runLive</code>, <code>runCanned</code>, keyboard handling (Space/→/←/R)</td>
           </tr>
           <tr>
             <td><code>build.mjs</code></td>
@@ -621,8 +621,9 @@
       <li><strong>Double-click <code>shazam-demo.html</code></strong> — it opens directly in your browser, fully offline. No server, no install, no command line.</li>
       <li><strong>Use Chrome or Edge for the live-mic path.</strong> Safari often blocks microphone access on <code>file://</code> pages; canned playback works in any browser.</li>
       <li>Wait for the start screen to show <strong>"Ready ✓"</strong> — songs are fingerprinted in the background as soon as the page opens, so this is usually done before you need it.</li>
-      <li>Pick a mode: <strong>Canned playback</strong> — choose a song from the dropdown and click ▶. <strong>Live (mic)</strong> — click 🎤 and play the song into the microphone for about 10 seconds; the waveform draws in real time as it records.</li>
+      <li>Pick a mode: <strong>Canned playback</strong> — choose a song from the dropdown and click ▶. <strong>Live</strong> — click <strong>🎤 Enable microphone</strong> and, once it reads "Mic ready ✓", click <strong>● Record &amp; identify</strong> and play the song into the microphone for about 10 seconds; the waveform draws in real time as it records. (Enabling the mic as its own step lets the microphone settle first, so the start of the recording isn't lost to warm-up.)</li>
       <li>Step through the six stages with <strong>Spacebar</strong> (or the Next button); <strong>←</strong> goes back, <strong>R</strong> replays the current stage's animation, and the fullscreen button (⛶) is there for the projector.</li>
+      <li>On the waveform and Fourier stages, <strong>▶ Play clip</strong> plays your recording back — on the Fourier stage the highlighted slice follows the playhead, so its frequency breakdown updates in time with what you hear.</li>
     </ol>
 
     <div class="callout">
@@ -633,7 +634,7 @@
 
     <h3>Rehearsal checklist</h3>
     <ul class="checklist">
-      <li>Grant microphone permission once, in the presentation browser, before going live.</li>
+      <li>Click <strong>Enable microphone</strong> and grant permission (browsers re-ask on every <code>file://</code> load), then wait for "Mic ready ✓" before recording.</li>
       <li>Confirm a real live recording of a database song lands the correct match, in the room where you'll present.</li>
       <li>Have canned playback ready as the instant fallback if the live match fails.</li>
       <li>Run <code>npm test</code> to confirm the DSP core still passes (FFT, peak detection, fingerprint determinism, end-to-end match).</li>
