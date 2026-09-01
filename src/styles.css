@@ -1,0 +1,37 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #0a0a12; color: #e8e8f0;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+#app { height: 100%; display: flex; flex-direction: column; }
+#topbar { display: flex; align-items: center; gap: 10px; padding-left: 16px; }
+#homeBtn { white-space: nowrap; padding: 8px 14px; font-size: 18px; }
+#tracker { display: flex; gap: 8px; padding: 14px 20px; flex: 1; }
+#tracker .step { flex: 1; text-align: center; padding: 8px; border-radius: 8px;
+  background: #16162a; color: #6a6a88; font-size: 18px; font-weight: 600; }
+#tracker .step.active { background: #2b2bff; color: #fff; }
+#tracker .step.done { color: #9a9ac8; }
+/* min-height:0 lets this flex item shrink instead of overflowing the viewport;
+   the canvas is absolutely positioned so it never forces #stage taller than its
+   flex share (which would push #controls below the fold on shorter screens). */
+#stage { flex: 1; position: relative; min-height: 0; }
+#stageCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#caption { padding: 12px 24px; font-size: 26px; text-align: center; min-height: 56px; }
+#controls { display: flex; gap: 12px; justify-content: center; padding: 0 20px 18px; }
+button { font-size: 21px; padding: 12px 22px; border: 0; border-radius: 10px;
+  background: #2b2bff; color: #fff; cursor: pointer; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+button.secondary { background: #23233a; }
+#recordBtn { background: #d23b3b; }
+#start { position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 22px; background: #0a0a12; z-index: 10; }
+#start h1 { font-size: 42px; } #start .modes { display: flex; gap: 20px; align-items: center; }
+#status { color: #9a9ac8; font-size: 19px; min-height: 24px; }
+#normToggle { color: #9a9ac8; font-size: 18px; display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+#normToggle input { width: 18px; height: 18px; cursor: pointer; }
+#loading { position: absolute; inset: 0; display: none; align-items: center;
+  justify-content: center; font-size: 28px; background: rgba(10,10,18,.9); z-index: 20; }
+select { font-size: 20px; padding: 10px; border-radius: 8px; }
+#levelMeter { position: absolute; left: 24px; right: 24px; bottom: 20px; height: 10px;
+  border-radius: 6px; background: #16162a; overflow: hidden; z-index: 5; }
+#levelBar { height: 100%; width: 0%; opacity: .35; background: #4be0c0;
+  transition: width 60ms linear, opacity 60ms linear; }
+.hidden { display: none !important; }

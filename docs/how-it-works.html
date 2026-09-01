@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How Shazam Works</title>
+<style>
+  :root {
+    --bg: #0a0a12;
+    --bg-raised: #12121f;
+    --bg-inset: #16162a;
+    --border: #26264a;
+    --text: #e8e8f0;
+    --text-dim: #9a9ac8;
+    --text-faint: #6a6a88;
+    --accent: #4be0c0;
+    --accent2: #2b2bff;
+    --accent2-soft: #3a3aff;
+    --warn: #ffd24b;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.65;
+    font-size: 17px;
+  }
+
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(75, 224, 192, 0.35); }
+  a:hover { border-bottom-color: var(--accent); }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  header.hero {
+    margin-bottom: 40px;
+  }
+  header.hero .eyebrow {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  header.hero h1 {
+    font-size: 40px;
+    line-height: 1.15;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+  header.hero p.lede {
+    color: var(--text-dim);
+    font-size: 19px;
+    margin: 0;
+    max-width: 60ch;
+  }
+
+  nav.toc {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 32px 0 56px;
+  }
+  nav.toc .toc-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 10px;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin-bottom: 6px; break-inside: avoid; }
+  nav.toc a { border-bottom: none; color: var(--text); }
+  nav.toc a:hover { color: var(--accent); }
+
+  section { margin: 64px 0; }
+  section:first-of-type { margin-top: 0; }
+
+  h2 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+    scroll-margin-top: 24px;
+  }
+  h2 .num {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    margin-right: 10px;
+  }
+  h3 {
+    font-size: 20px;
+    margin: 36px 0 10px;
+    color: var(--text);
+    scroll-margin-top: 24px;
+  }
+  h3 .stage-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent2);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    margin-right: 10px;
+    vertical-align: middle;
+  }
+
+  p { margin: 14px 0; }
+  .section-intro { color: var(--text-dim); font-size: 17px; }
+
+  strong { color: #fff; font-weight: 650; }
+
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.1em 0.4em;
+    font-size: 0.87em;
+    color: #d7d7ff;
+  }
+
+  pre {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 1em;
+    color: var(--text);
+  }
+
+  .analogy {
+    border-left: 3px solid var(--accent);
+    background: var(--bg-raised);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .analogy .tag {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .analogy p { margin: 0; color: var(--text-dim); }
+
+  .pipeline-list {
+    list-style: none;
+    margin: 24px 0;
+    padding: 0;
+    counter-reset: stage;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .pipeline-list li {
+    counter-increment: stage;
+    display: flex;
+    gap: 14px;
+    align-items: baseline;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .pipeline-list li::before {
+    content: counter(stage);
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent2);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pipeline-list .name { font-weight: 650; color: #fff; margin-right: 6px; }
+  .pipeline-list .desc { color: var(--text-dim); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 15px;
+  }
+  caption { caption-side: top; text-align: left; color: var(--text-faint); font-size: 13px; margin-bottom: 8px; }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--text-faint);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  tbody tr:hover { background: var(--bg-raised); }
+  td code { white-space: nowrap; }
+
+  .table-scroll { overflow-x: auto; }
+
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 8px;
+    margin: 18px 0;
+  }
+  .config-grid .kv {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13.5px;
+  }
+  .config-grid .kv .k { color: var(--text-faint); display: block; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .config-grid .kv .v { color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; }
+
+  ol.steps, ul.plain {
+    padding-left: 22px;
+    margin: 16px 0;
+  }
+  ol.steps li, ul.plain li { margin-bottom: 8px; }
+
+  .checklist {
+    list-style: none;
+    padding: 0;
+    margin: 18px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .checklist li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .checklist li::before {
+    content: "\2610";
+    color: var(--accent);
+    font-size: 16px;
+    line-height: 1.4;
+  }
+
+  .callout {
+    background: rgba(255, 210, 75, 0.08);
+    border: 1px solid rgba(255, 210, 75, 0.35);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 18px 0;
+    font-size: 15.5px;
+    color: var(--text-dim);
+  }
+  .callout strong { color: var(--warn); }
+
+  hr.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 56px 0;
+  }
+
+  footer {
+    color: var(--text-faint);
+    font-size: 14px;
+    text-align: center;
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 560px) {
+    .page { padding: 36px 18px 72px; }
+    header.hero h1 { font-size: 30px; }
+    header.hero p.lede { font-size: 17px; }
+    nav.toc ol { columns: 1; }
+    h2 { font-size: 23px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div class="eyebrow">Reading document · offline</div>
+    <h1>How Shazam Works</h1>
+    <p class="lede">
+      A companion to the live demo: what the algorithm actually does, why each step exists,
+      and where to find it in this project's source code.
+    </p>
+  </header>
+
+  <nav class="toc" aria-label="Table of contents">
+    <div class="toc-title">On this page</div>
+    <ol>
+      <li><a href="#what">1. What Shazam does</a></li>
+      <li><a href="#pipeline">2. The pipeline at a glance</a></li>
+      <li><a href="#stages">3. Each stage explained</a></li>
+      <li><a href="#code">4. How the code is organised</a></li>
+      <li><a href="#run">5. How to build &amp; run</a></li>
+    </ol>
+  </nav>
+
+  <section id="what">
+    <h2><span class="num">1</span>What Shazam does</h2>
+    <p class="section-intro">
+      Hold a phone up in a noisy room for a few seconds, and Shazam tells you the name of the
+      song playing. That's the whole product. The hard part is everything hidden underneath it.
+    </p>
+    <p>
+      The core problem is a search problem with brutal constraints: take a
+      <strong>short, noisy audio clip</strong> — maybe 10 seconds, picked up through a cheap
+      microphone, mixed with room echo, chatter, and whatever else is in the environment — and
+      find its exact match among a database of <strong>millions of songs</strong>, in under a
+      second, with essentially <strong>no false positives</strong>. Comparing raw waveforms
+      directly doesn't work: the same song recorded twice in different rooms produces two very
+      different lists of numbers, even though a human ear recognises them instantly. Shazam needs
+      a representation of a song that survives background noise, distortion, and a bad microphone,
+      while still being unique enough to distinguish one track from millions of others. It's a bit
+      like recognising one person's voice in a stadium crowd, when you've only ever heard them
+      speak once, briefly, on the phone.
+    </p>
+    <p>
+      Shazam's approach to this — the audio fingerprinting technique this page walks through — was
+      developed around 1999, before smartphones existed. The original service ran over the phone
+      network: you'd dial <strong>2580</strong>, hold your phone up to the music for a few seconds,
+      hang up, and a text message would arrive with the song's name. It later became one of the
+      first breakout mobile apps, and Apple acquired the company in 2018 for roughly
+      <strong>$400 million</strong>. The underlying algorithm — the one this demo reproduces — is
+      largely the same idea that made the 2580 dial-in work: turn audio into a sparse set of
+      landmark points, hash those points, and vote.
+    </p>
+  </section>
+
+  <section id="pipeline">
+    <h2><span class="num">2</span>The pipeline at a glance</h2>
+    <p class="section-intro">
+      Six stages turn a raw recording into a confident match. Each one strips away information the
+      next stage doesn't need, until only a small, robust, searchable signature is left.
+    </p>
+    <ol class="pipeline-list">
+      <li><div><span class="name">Waveform</span><span class="desc">— the microphone captures raw air pressure over time.</span></div></li>
+      <li><div><span class="name">Fourier transform</span><span class="desc">— a short slice of that waveform is decomposed into the sine waves (frequencies) it's made of.</span></div></li>
+      <li><div><span class="name">Spectrogram</span><span class="desc">— repeat the transform across many overlapping slices and stack the results into a time × frequency picture.</span></div></li>
+      <li><div><span class="name">Peak detection</span><span class="desc">— keep only the strongest, most distinctive points in that picture — a sparse "constellation".</span></div></li>
+      <li><div><span class="name">Fingerprints</span><span class="desc">— pair nearby peaks together and hash each pair into a compact, searchable number.</span></div></li>
+      <li><div><span class="name">Matching</span><span class="desc">— look up those hashes in a song database and let matching hashes "vote" for the correct song.</span></div></li>
+    </ol>
+  </section>
+
+  <section id="stages">
+    <h2><span class="num">3</span>Each stage explained</h2>
+    <p class="section-intro">
+      The same six stages, now with the reasoning and the analogies used in the live demo.
+    </p>
+
+    <h3><span class="stage-num">1</span>Waveform</h3>
+    <p>
+      A microphone converts sound into a single long list of numbers: air pressure sampled many
+      thousand times per second. It's a completely accurate record of the sound, but it's also
+      close to useless for recognition on its own — two recordings of the same song, made a few
+      milliseconds apart or through different microphones, produce wildly different number
+      sequences even though they sound identical. What actually identifies a song isn't the raw
+      pressure values; it's the pattern of <strong>musical frequencies</strong> layered on top of
+      each other over time. Pulling those frequencies out is the job of the next stage.
+    </p>
+
+    <h3><span class="stage-num">2</span>Fourier transform</h3>
+    <p>
+      The Fourier transform takes a signal that mixes many frequencies together and breaks it back
+      apart into the individual sine waves that were added up to make it — along with the strength
+      (amplitude) of each one.
+    </p>
+    <div class="analogy">
+      <div class="tag">Analogy — the coin-sorting machine</div>
+      <p>
+        Imagine a piggy bank full of mixed coins, tipped out into one pile. You can't tell how much
+        money you have just by looking at the pile. Run it through a coin-sorting machine and it
+        separates the pile into stacks by denomination, each stack telling you a coin type and how
+        many of them there are. The Fourier transform does the same thing to sound: it takes one
+        jumbled pressure signal and sorts it into a set of "denominations" — frequencies — each with
+        an amplitude (how much of that frequency is present).
+      </p>
+    </div>
+    <p>
+      Shazam (and this demo) uses the <strong>Fast Fourier Transform</strong> (FFT): the same
+      mathematical result as a naive Fourier transform, but computed in
+      <code>O(N log N)</code> time instead of <code>O(N²)</code> — the difference between "runs
+      instantly on a phone" and "too slow to be usable".
+    </p>
+    <p>
+      A single Fourier transform over an entire song would only tell you which frequencies occur
+      <em>somewhere</em> in the whole track, with no sense of <em>when</em>. To recover timing, the
+      transform is applied to many short, overlapping slices of audio instead — each only tens of
+      milliseconds long — which is exactly what the next stage does.
+    </p>
+
+    <h3><span class="stage-num">3</span>Spectrogram</h3>
+    <p>
+      Running a short-window Fourier transform (a <strong>Short-Time Fourier Transform</strong>, or
+      STFT) repeatedly across the recording, one overlapping slice at a time, and stacking the
+      results side by side produces a <strong>spectrogram</strong>: a 2D picture where the x-axis is
+      time, the y-axis is frequency, and brightness is amplitude. It shows exactly which
+      frequencies were present, and precisely when.
+    </p>
+
+    <h3><span class="stage-num">4</span>Peak detection / constellation map</h3>
+    <p>
+      A spectrogram still contains almost everything — background noise, room reverb, every faint
+      overtone. Most of that detail is fragile: it changes between two recordings of the same song.
+      So Shazam sparsifies the spectrogram, keeping only the points that are the <strong>strongest
+      local peak</strong> in a small neighbourhood of time and frequency around them, and discarding
+      everything else.
+    </p>
+    <div class="analogy">
+      <div class="tag">Analogy — back to the piggy bank</div>
+      <p>
+        This is like tipping the sorted coin stacks out again and sweeping away all the low-value
+        coins, keeping only the handful of largest ones. You lose most of the "mass" of the
+        original pile, but the big coins you kept are the ones least likely to be missing next
+        time you count — they're the coins that survive a sloppy recount. In audio terms: peaks
+        are the parts of the spectrogram most likely to survive background noise, compression, and
+        EQ changes, because they're the loudest, most dominant features at that instant.
+      </p>
+    </div>
+    <p>
+      Once only the peaks remain, even their loudness (amplitude) is discarded — only their
+      <strong>coordinates</strong> (time, frequency) matter from here on. What's left is a sparse
+      scatter of points often called the <strong>constellation map</strong>, because it looks like a
+      star field laid over the original spectrogram.
+    </p>
+
+    <h3><span class="stage-num">5</span>Fingerprints</h3>
+    <p>
+      A single peak, on its own, isn't distinctive enough — plenty of songs share an isolated
+      frequency at some point in time. So Shazam combines peaks into pairs. Each peak in turn acts
+      as an <strong>anchor</strong>, and is paired with other peaks that occur shortly afterwards,
+      within a bounded "target zone" of time and frequency. Each pair is reduced to three numbers —
+      the anchor's frequency, the paired peak's frequency, and the time gap between them —
+      written as <code>(f₁, f₂, Δt)</code> — which are packed together into a single compact
+      <strong>hash</strong> (a 32-bit integer in this implementation).
+    </p>
+    <div class="analogy">
+      <div class="tag">Analogy — the library shelf</div>
+      <p>
+        Think of every possible hash value as one shelf in an enormous library. Every song that
+        happens to contain that exact <code>(f₁, f₂, Δt)</code> pattern gets a book placed on that
+        shelf, with a note inside recording which song it is and exactly where in the song that
+        pattern occurred. Later, given an unknown clip, you compute its own hashes, walk over to
+        the matching shelves, and see which books keep turning up.
+      </p>
+    </div>
+    <p>
+      Pairing peaks this way is what makes the fingerprint robust: even if noise wipes out or adds
+      a few isolated peaks, plenty of the original pairs — and therefore plenty of the original
+      hashes — survive intact.
+    </p>
+
+    <h3><span class="stage-num">6</span>Matching (offset voting)</h3>
+    <p>
+      To identify a clip, Shazam computes its fingerprints exactly as above, then looks each hash
+      up in the song database. Every hit records which song it came from and how far into that
+      song it occurred. For every hit, Shazam computes an
+      <strong>offset</strong> — <code>offset = time in song − time in recording</code> — and casts
+      one vote for the pair <code>(song, offset)</code>.
+    </p>
+    <p>
+      If the clip really is a piece of a particular song, then <em>almost all</em> of its hashes
+      align to the same point in that song, so nearly every vote for the correct song lands on the
+      <strong>same offset</strong> — producing one large, sharp spike of votes. Coincidental hash
+      collisions with wrong songs, by contrast, land on essentially random offsets and spread thinly
+      across many buckets. The song with the tallest single-offset spike — and how tall that spike
+      is — becomes the match and its confidence score.
+    </p>
+  </section>
+
+  <section id="code">
+    <h2><span class="num">4</span>How the code is organised</h2>
+    <p class="section-intro">
+      The demo is hand-written vanilla JavaScript with no external libraries — including the FFT.
+      Each source file has one job. <code>src/dsp.js</code> is written to run unmodified in Node
+      (for tests), as a browser <code>&lt;script&gt;</code>, and inside a Web Worker.
+    </p>
+    <div class="table-scroll">
+      <table>
+        <caption>Source files and their responsibilities</caption>
+        <thead>
+          <tr><th>File</th><th>Responsibility</th><th>Key exports / functions</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>src/dsp.js</code></td>
+            <td>The pure DSP core — no DOM, no Web Audio, just math on arrays. This is the whole algorithm described in Section 3.</td>
+            <td><code>CONFIG</code>, <code>fft</code>, <code>hann</code>, <code>stft</code>, <code>findPeaks</code>, <code>fingerprint</code>, <code>buildDatabase</code>, <code>matchQuery</code></td>
+          </tr>
+          <tr>
+            <td><code>src/audio.js</code></td>
+            <td>Browser audio I/O: decoding embedded MP3s to mono PCM, slicing clips, streaming microphone capture, and playback. Web Audio only runs on the main thread, so all of this lives here rather than in the worker.</td>
+            <td><code>AudioIO.decodeToMono</code>, <code>base64ToArrayBuffer</code>, <code>sliceSeconds</code>, <code>resampleLinear</code>, <code>captureMicStreaming</code>, <code>makeSource</code></td>
+          </tr>
+          <tr>
+            <td><code>src/worker.js</code></td>
+            <td>The Web Worker message handler. Runs the CPU-heavy fingerprinting (many FFTs) off the main thread so the UI never stalls. The build prepends <code>dsp.js</code> to this file so <code>self.DSP</code> exists inside the worker.</td>
+            <td><code>self.onmessage</code> → <code>{ id, fingerprints }</code></td>
+          </tr>
+          <tr>
+            <td><code>src/renderers.js</code></td>
+            <td>One Canvas 2D renderer per pipeline stage. Each renderer takes precomputed stage data plus an animation progress value (0–1) and draws that stage's visualisation.</td>
+            <td><code>Renderers.waveform</code>, <code>fourier</code>, <code>spectrogram</code>, <code>peaks</code>, <code>fingerprints</code>, <code>matching</code></td>
+          </tr>
+          <tr>
+            <td><code>src/controller.js</code></td>
+            <td>The app's state machine: loads the song database in the background via the worker, handles mode selection (live / canned), precomputes every stage's data up front, drives the animation clock, and wires up keyboard/button controls.</td>
+            <td><code>App.loadDatabase</code>, <code>showStage</code>, <code>precompute</code>, <code>runLive</code>, <code>runCanned</code>, keyboard handling (Space/→/←/R)</td>
+          </tr>
+          <tr>
+            <td><code>build.mjs</code></td>
+            <td>The Node build script. Reads every MP3 in <code>./songs/</code>, parses <code>Artist - Title.mp3</code> filenames into metadata, base64-encodes each full song, and inlines everything — styles, songs, worker source, and the bundled scripts — into one template to produce the single deliverable file.</td>
+            <td>reads <code>src/template.html</code>, writes <code>shazam-demo.html</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      All the tunable pipeline constants live in one place, <code>CONFIG</code> at the top of
+      <code>src/dsp.js</code>, so the whole algorithm can be re-tuned in one spot:
+    </p>
+    <div class="config-grid">
+      <div class="kv"><span class="k">sampleRate</span><span class="v">11025</span></div>
+      <div class="kv"><span class="k">frameSize</span><span class="v">1024</span></div>
+      <div class="kv"><span class="k">hopSize</span><span class="v">512</span></div>
+      <div class="kv"><span class="k">peakNeighborhoodTime</span><span class="v">3</span></div>
+      <div class="kv"><span class="k">peakNeighborhoodFreq</span><span class="v">3</span></div>
+      <div class="kv"><span class="k">peaksPerFrameCap</span><span class="v">5</span></div>
+      <div class="kv"><span class="k">targetZoneMinDt</span><span class="v">1</span></div>
+      <div class="kv"><span class="k">targetZoneMaxDt</span><span class="v">63</span></div>
+      <div class="kv"><span class="k">targetZoneFreqRange</span><span class="v">200</span></div>
+      <div class="kv"><span class="k">fanout</span><span class="v">12</span></div>
+      <div class="kv"><span class="k">minScore</span><span class="v">5</span></div>
+    </div>
+    <p>
+      Audio is downsampled to <code>11025</code> Hz before analysis — plenty of resolution for
+      fingerprinting, and cheap to compute on. Each analysis frame is <code>1024</code> samples,
+      about 93 ms, with a 512-sample hop between frames — 50% overlap between consecutive windows:
+    </p>
+    <pre><code>function stft(pcm, cfg = CONFIG) {
+  const { frameSize, hopSize } = cfg;
+  const win = hann(frameSize), numBins = frameSize / 2;
+  const numFrames = Math.max(0, 1 + Math.floor((pcm.length - frameSize) / hopSize));
+  const columns = [];
+  const re = new Float64Array(frameSize), im = new Float64Array(frameSize);
+  for (let f = 0; f < numFrames; f++) {
+    const off = f * hopSize;
+    for (let i = 0; i < frameSize; i++) { re[i] = pcm[off + i] * win[i]; im[i] = 0; }
+    fft(re, im);
+    const col = new Float32Array(numBins);
+    for (let b = 0; b < numBins; b++) col[b] = Math.hypot(re[b], im[b]);
+    columns.push(col);
+  }
+  return { columns, numFrames, numBins };
+}</code></pre>
+    <p>
+      The fingerprint hash itself packs the anchor frequency bin, the paired peak's frequency bin,
+      and the time gap between them into one unsigned 32-bit integer:
+    </p>
+    <pre><code>const hash = (((a.f &amp; 0x1FF) &lt;&lt; 23) | ((b.f &amp; 0x1FF) &lt;&lt; 14) | (dt &amp; 0x3FFF)) &gt;&gt;&gt; 0;</code></pre>
+    <p>
+      9 bits for each frequency bin plus 14 bits for the time delta adds up to exactly 32 bits —
+      the whole fingerprint fits in a single JavaScript unsigned integer, cheap to store and to
+      use as a hash-map key.
+    </p>
+  </section>
+
+  <section id="run">
+    <h2><span class="num">5</span>How to build &amp; run</h2>
+
+    <h3>Build</h3>
+    <ol class="steps">
+      <li>Put MP3s in <code>./songs/</code>, named <code>Artist - Song title.mp3</code> (5–10 songs recommended — full songs are embedded, so more songs means a bigger file and a slower first load).</li>
+      <li>Run <code>npm run build</code>. This produces <code>shazam-demo.html</code> at the repository root and prints the song count and resulting file size.</li>
+    </ol>
+
+    <h3>Run the demo</h3>
+    <ol class="steps">
+      <li><strong>Double-click <code>shazam-demo.html</code></strong> — it opens directly in your browser, fully offline. No server, no install, no command line.</li>
+      <li><strong>Use Chrome or Edge for the live-mic path.</strong> Safari often blocks microphone access on <code>file://</code> pages; canned playback works in any browser.</li>
+      <li>Wait for the start screen to show <strong>"Ready ✓"</strong> — songs are fingerprinted in the background as soon as the page opens, so this is usually done before you need it.</li>
+      <li>Pick a mode: <strong>Canned playback</strong> — choose a song from the dropdown and click ▶. <strong>Live (mic)</strong> — click 🎤 and play the song into the microphone for about 10 seconds; the waveform draws in real time as it records.</li>
+      <li>Step through the six stages with <strong>Spacebar</strong> (or the Next button); <strong>←</strong> goes back, <strong>R</strong> replays the current stage's animation, and the fullscreen button (⛶) is there for the projector.</li>
+    </ol>
+
+    <div class="callout">
+      <strong>Note:</strong> this documentation page is independent of <code>shazam-demo.html</code>
+      and the slide deck — it doesn't need a build, mic access, or any of the embedded songs.
+      It's meant to be read on its own, before or after the live demo.
+    </div>
+
+    <h3>Rehearsal checklist</h3>
+    <ul class="checklist">
+      <li>Grant microphone permission once, in the presentation browser, before going live.</li>
+      <li>Confirm a real live recording of a database song lands the correct match, in the room where you'll present.</li>
+      <li>Have canned playback ready as the instant fallback if the live match fails.</li>
+      <li>Run <code>npm test</code> to confirm the DSP core still passes (FFT, peak detection, fingerprint determinism, end-to-end match).</li>
+      <li>If you swap songs, re-run <code>npm run build</code> and re-check both the build's printed file size and a fresh match.</li>
+    </ul>
+  </section>
+
+  <hr class="divider" />
+
+  <footer>
+    Standalone documentation for the "How Shazam Works" pipeline demo — self-contained, offline, no external resources.
+  </footer>
+
+</div>
+</body>
+</html>

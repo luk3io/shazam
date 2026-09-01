@@ -1,0 +1,6 @@
+{
+  "name": "shazam-demo",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "scripts": { "test": "node --test", "build": "node build.mjs" }
+}

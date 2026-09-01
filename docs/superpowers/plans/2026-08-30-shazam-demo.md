@@ -841,14 +841,15 @@ Then verify the self-test:
     $('start').classList.add('hidden'); $('controls').classList.add('hidden');
     stageIdx = 0; renderTracker();
     $('caption').textContent = 'Listening… play the song now.';
-    const live = new Float32Array(D.CONFIG.sampleRate * 11); let filled = 0;
-    const liveData = { pcm: live };
+    // Live visual buffer: draw raw mic samples as they arrive (shape only — no resampling).
+    // Sized for the worst-case native mic rate so it never overflows during the 10 s capture.
+    const live = new Float32Array(48000 * 11); let filled = 0;
     const onChunk = chunk => {
-      const rs = IO.resampleLinear(chunk, 48000, D.CONFIG.sampleRate); // approx; visual only
-      for (let i = 0; i < rs.length && filled < live.length; i++) live[filled++] = rs[i];
+      for (let i = 0; i < chunk.length && filled < live.length; i++) live[filled++] = chunk[i];
       const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
-      root.Renderers.waveform(ctx, { pcm: live.subarray(0, filled) }, 1, W, H);
+      root.Renderers.waveform(ctx, { pcm: live.subarray(0, filled) }, 1, W, H); // maps across full width
     };
+    // captureMicStreaming returns the recording correctly resampled to the DSP rate.
     const pcm = await IO.captureMicStreaming(10, onChunk, null);
     $('caption').textContent = 'Analysing…';
     await dbReady;
@@ -896,7 +897,7 @@ Then verify the self-test:
   if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', initUI);
 ```
 
-Note: the live `onChunk` resample assumes ~48 kHz for the visual stream; the authoritative recording returned by `captureMicStreaming` is correctly resampled regardless. If `AudioContext` honored the requested rate, the visual approximation is still fine (waveform shape only).
+Note: the live `onChunk` draws raw mic samples for the Stage-1 visual (waveform shape only, mapped across the full canvas width regardless of the mic's native rate). The recording that is actually fingerprinted/matched is the return value of `captureMicStreaming`, which is correctly resampled to the DSP rate.
 
 - [ ] **Step 2: Build** — Run: `npm run build`.
 
