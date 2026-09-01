@@ -279,8 +279,10 @@
     }
     $('caption').textContent = 'Analysing…';
     logRecordingRMS(pcm, 'raw');            // diagnostic: shows the mic's droop/quietness
-    pcm = IO.normalizeRecording(pcm);       // flatten the slow gain fade + lift quiet captures
-    logRecordingRMS(pcm, 'normalized');     // diagnostic: should be flat + louder
+    if ($('normChk') && $('normChk').checked) {
+      pcm = IO.normalizeRecording(pcm);     // flatten the slow gain fade + lift quiet captures
+      logRecordingRMS(pcm, 'normalized');   // diagnostic: should be flat + louder
+    }
     await dbReady;
     precompute(pcm);
     $('controls').classList.remove('hidden');
