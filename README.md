@@ -11,15 +11,21 @@ and matches a song (live mic or canned clip) against the embedded tracks.
 - Double-click `shazam-demo.html` (opens in your browser, fully offline).
 - **Use Chrome or Edge for the live-mic path** (Safari often blocks mic on file://).
 - Wait for "Ready ✓" on the start screen (songs are analysed in the background).
-- **Canned playback:** pick a song, click ▶. **Live:** click 🎤, play the song into the mic for 10s
-  (the waveform draws in real time as it records).
+- **Canned playback:** pick a song, click ▶.
+- **Live:** click 🎤 **Enable microphone**; once it reads "Mic ready ✓", click ● **Record & identify**
+  and play the song for ~10s — the waveform draws in real time. Enabling the mic as its own step lets it
+  settle first, so the start of the recording isn't clipped.
+- **Even out recording volume** (start-screen toggle, on by default) evens out a quiet or uneven mic
+  capture. It's cosmetic — it changes how the clip sounds/looks, not the match.
+- **▶ Play clip** (on the waveform and Fourier stages) plays your recording back; on the Fourier stage the
+  analysed slice follows the playhead, so its frequency breakdown updates in time with the audio.
 - Space / → = next stage, ← = previous, R = replay animation, ⛶ = fullscreen.
 
 ## Documentation
 Open `docs/how-it-works.html` for a full explanation of the concepts and the code.
 
 ## Rehearsal checklist
-- [ ] Grant mic permission once in the presentation browser.
+- [ ] Click **Enable microphone** and grant permission (browsers re-ask on every `file://` load); wait for "Mic ready ✓".
 - [ ] Confirm a live recording of a DB song lands the correct match.
 - [ ] Have canned playback ready as the fallback.
 
