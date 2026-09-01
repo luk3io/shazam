@@ -22,7 +22,8 @@ and matches a song (live mic or canned clip) against the embedded tracks.
 - Space / → = next stage, ← = previous, R = replay animation, ⛶ = fullscreen.
 
 ## Documentation
-Open `docs/how-it-works.html` for a full explanation of the concepts and the code.
+- `docs/how-it-works.html` — **the concepts:** what the algorithm does and why, with analogies (presenter-facing).
+- `docs/code-guide.md` — **the codebase:** how it's wired, the end-to-end data flow, and where to change things (developer-facing).
 
 ## Rehearsal checklist
 - [ ] Click **Enable microphone** and grant permission (browsers re-ask on every `file://` load); wait for "Mic ready ✓".
