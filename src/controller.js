@@ -48,6 +48,10 @@
     ['matching',     'Votes for the same song at the same time-offset reveal the match.'],
   ];
   const STAGE_SUBSTEPS = [1, 1, 2, 1, 1, 2]; // spectrogram (2) and matching (2) reveal over two Next presses
+  // Stages where the "Play clip" button works, and what the playhead drives on each:
+  // 'cursor' = the waveform playback line, 'slice' = the Fourier analysed slice.
+  const PLAYHEAD = { 0: 'cursor', 1: 'slice' };
+  const isPlayable = i => i in PLAYHEAD;
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
@@ -81,11 +85,11 @@
     };
     anim = requestAnimationFrame(tick);
   }
-  // Stage-1 "Play clip" button: lets the audience hear the recording they're looking at.
+  // "Play clip" button: lets the audience hear the recording they're looking at.
   function stopPlayback() {
     if (playSource) { playSource.stop(); playSource = null; }
     cancelAnimationFrame(playAnim);
-    if (stageData) { stageData.playhead = null; if (stageIdx === 0) draw(1); } // clear the cursor
+    if (stageData) { stageData.playhead = null; if (isPlayable(stageIdx)) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
   }
   // While the clip plays, advance a playback cursor each frame. On the waveform stage that's the
@@ -94,21 +98,24 @@
   function startPlayheadLoop() {
     cancelAnimationFrame(playAnim);
     const tick = () => {
-      if (!playSource || (stageIdx !== 0 && stageIdx !== 1) || !stageData) { stopPlayback(); return; }
+      if (!playSource || !isPlayable(stageIdx) || !stageData) { stopPlayback(); return; }
       const frac = Math.min(1, playSource.elapsed() / (playSource.duration || 1));
       stageData.playhead = frac;
-      if (stageIdx === 1) { // Fourier: move the analysed slice to the playhead
+      let redraw = true;
+      if (PLAYHEAD[stageIdx] === 'slice') { // Fourier: move the analysed slice to the playhead
         const maxF = stageData.spec.numFrames - 1;
-        stageData.focusFrame = Math.max(0, Math.min(maxF, Math.round(frac * stageData.pcm.length / D.CONFIG.hopSize)));
+        const f = Math.max(0, Math.min(maxF, Math.round(frac * stageData.pcm.length / D.CONFIG.hopSize)));
+        redraw = f !== stageData.focusFrame; // only redraw when the slice (and its FFT) actually changes
+        stageData.focusFrame = f;
       }
-      draw(1);
+      if (redraw) draw(1);
       if (playSource.isEnded() || frac >= 1) { stopPlayback(); return; }
       playAnim = requestAnimationFrame(tick);
     };
     playAnim = requestAnimationFrame(tick);
   }
   function updatePlayBtn() {
-    $('playBtn').classList.toggle('hidden', (stageIdx !== 0 && stageIdx !== 1) || !stageData);
+    $('playBtn').classList.toggle('hidden', !isPlayable(stageIdx) || !stageData);
   }
   // Fingerprints "View" toggle (only on Stage 5): Spread (~40 anchors) vs All (every fingerprint).
   function updateFpBtn() {

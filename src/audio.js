@@ -86,7 +86,6 @@
     const track = stream.getAudioTracks()[0];
     return { settings: track && track.getSettings ? track.getSettings() : {} };
   }
-  const micReady = () => !!mic;
   function stopMic() {
     if (!mic) return;
     try { if (mic.keepAlive) mic.keepAlive.stop(); mic.srcNode.disconnect(); mic.analyser.disconnect(); mic.ac.close(); } catch (e) {}
@@ -132,11 +131,11 @@
   // gain chasing transient clicks — that click-chasing is what made an earlier peak-based version sound
   // scratchy. A per-sample hard limit prevents clipping. Purely cosmetic/audible: the fingerprint
   // peak-picker is per-frame relative, so matching is unaffected.
-  function normalizeRecording(pcm, sr = SR(), opts = {}) {
+  function normalizeRecording(pcm) {
     const n = pcm.length;
     if (!n) return pcm;
-    const targetRMS = opts.targetRMS || 0.14, maxGain = opts.maxGain || 10, ceiling = opts.ceiling || 0.97;
-    const winSamp = Math.max(1, Math.floor((opts.windowSec || 0.4) * sr));
+    const sr = SR(), targetRMS = 0.14, maxGain = 10, ceiling = 0.97;
+    const winSamp = Math.max(1, Math.floor(0.4 * sr)); // ~0.4 s smoothing window
     const hop = Math.max(1, Math.floor(winSamp / 8)), nb = Math.ceil(n / hop);
     // Short-time RMS envelope (each block averages over ~winSamp centred-ish on the block start).
     const rms = new Float32Array(nb);
@@ -147,7 +146,7 @@
     }
     let maxR = 0; for (let b = 0; b < nb; b++) if (rms[b] > maxR) maxR = rms[b];
     if (maxR === 0) return pcm.slice(); // pure silence: nothing to lift
-    const floor = Math.max(maxR * (opts.floorFrac || 0.12), 1e-4); // don't boost near-silence to full target
+    const floor = Math.max(maxR * 0.12, 1e-4); // don't boost near-silence to full target
     // Per-sample gain = min(maxGain, targetRMS / envRMS), interpolated between block centres; hard-limited.
     const out = new Float32Array(n);
     for (let i = 0; i < n; i++) {
@@ -181,5 +180,5 @@
     };
   }
 
-  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, micReady, stopMic, captureMicStreaming, normalizeRecording, makeSource };
+  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, normalizeRecording, makeSource };
 })(typeof self !== 'undefined' ? self : this);
