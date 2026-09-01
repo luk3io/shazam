@@ -88,20 +88,27 @@
     if (stageData) { stageData.playhead = null; if (stageIdx === 0) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
   }
-  // While the clip plays, advance a playback cursor on the Stage-1 waveform each frame.
+  // While the clip plays, advance a playback cursor each frame. On the waveform stage that's the
+  // cursor line; on the Fourier stage the analysed slice follows the playhead instead, so its
+  // frequency breakdown updates in step with what's being heard.
   function startPlayheadLoop() {
     cancelAnimationFrame(playAnim);
     const tick = () => {
-      if (!playSource || stageIdx !== 0 || !stageData) { stopPlayback(); return; }
-      stageData.playhead = Math.min(1, playSource.elapsed() / (playSource.duration || 1));
+      if (!playSource || (stageIdx !== 0 && stageIdx !== 1) || !stageData) { stopPlayback(); return; }
+      const frac = Math.min(1, playSource.elapsed() / (playSource.duration || 1));
+      stageData.playhead = frac;
+      if (stageIdx === 1) { // Fourier: move the analysed slice to the playhead
+        const maxF = stageData.spec.numFrames - 1;
+        stageData.focusFrame = Math.max(0, Math.min(maxF, Math.round(frac * stageData.pcm.length / D.CONFIG.hopSize)));
+      }
       draw(1);
-      if (playSource.isEnded() || stageData.playhead >= 1) { stopPlayback(); return; }
+      if (playSource.isEnded() || frac >= 1) { stopPlayback(); return; }
       playAnim = requestAnimationFrame(tick);
     };
     playAnim = requestAnimationFrame(tick);
   }
   function updatePlayBtn() {
-    $('playBtn').classList.toggle('hidden', stageIdx !== 0 || !stageData);
+    $('playBtn').classList.toggle('hidden', (stageIdx !== 0 && stageIdx !== 1) || !stageData);
   }
   // Fingerprints "View" toggle (only on Stage 5): Spread (~40 anchors) vs All (every fingerprint).
   function updateFpBtn() {
@@ -138,9 +145,9 @@
     draw(1);
   }
   function showStage(i) {
-    const wasStage0 = stageIdx === 0;
+    const prev = stageIdx;
     stageIdx = Math.max(0, Math.min(STAGES.length - 1, i));
-    if (wasStage0 && stageIdx !== 0) stopPlayback();
+    if (stageIdx !== prev) stopPlayback(); // playback is tied to the stage you're viewing
     updatePlayBtn(); updateFpBtn();
     canvas.style.cursor = (stageIdx === 0 || stageIdx === 1) ? 'ew-resize'
       : (stageIdx === 4 && fpMode === 'spread') ? 'crosshair' : 'default';
@@ -321,6 +328,7 @@
     $('playBtn').onclick = () => {
       if (!stageData) return;
       if (playSource) { stopPlayback(); return; }
+      cancelAnimationFrame(anim); // stop any in-progress stage reveal so the playhead drives the view
       playSource = IO.makeSource(stageData.pcm, stageData.sr);
       playSource.play();
       $('playBtn').textContent = '■ Stop clip';
@@ -363,7 +371,7 @@
       stageData.focusFrame = f; draw(1);
     }
     canvas.addEventListener('mousedown', e => {
-      if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; cancelAnimationFrame(anim); applyFocus(e); }
+      if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; stopPlayback(); cancelAnimationFrame(anim); applyFocus(e); }
       else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
     });
     canvas.addEventListener('mousemove', e => { if (dragging) applyFocus(e); });
