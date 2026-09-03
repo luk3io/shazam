@@ -54,6 +54,7 @@
   const isPlayable = i => i in PLAYHEAD;
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
+  let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
@@ -89,6 +90,9 @@
   function stopPlayback() {
     if (playSource) { playSource.stop(); playSource = null; }
     cancelAnimationFrame(playAnim);
+    // Restore the Fourier slice to where it was before playback moved it along with the playhead.
+    if (savedFocus != null && stageData) stageData.focusFrame = savedFocus;
+    savedFocus = null;
     if (stageData) { stageData.playhead = null; if (isPlayable(stageIdx)) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
   }
@@ -317,6 +321,7 @@
       if (!stageData) return;
       if (playSource) { stopPlayback(); return; }
       cancelAnimationFrame(anim); // stop any in-progress stage reveal so the playhead drives the view
+      savedFocus = (PLAYHEAD[stageIdx] === 'slice') ? stageData.focusFrame : null; // remember the slice to return to
       playSource = IO.makeSource(stageData.pcm, stageData.sr);
       playSource.play();
       $('playBtn').textContent = '■ Stop clip';
