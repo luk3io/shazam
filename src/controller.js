@@ -223,16 +223,25 @@
     $('caption').textContent = STAGES[stageIdx][1];
     subStep = 0;
     if (stageData) { stageData.fpMode = fpMode; stageData.fpSelected = null; stageData.subStep = 0; }
-    renderTracker(); animateStage();
+    renderTracker(); animateStage(); updateNav();
   }
+  // We're at the very end once the final stage (matching) is on its last sub-step — the match is
+  // revealed and there's nowhere further to go. atStart mirrors that for the first stage.
+  const atEnd = () => stageIdx === STAGES.length - 1 && subStep >= (STAGE_SUBSTEPS[stageIdx] || 1) - 1;
+  const atStart = () => stageIdx === 0 && subStep === 0;
+  function updateNav() { $('nextBtn').disabled = atEnd(); $('prevBtn').disabled = atStart(); }
   // Next/Prev advance an internal sub-step first (for stages that reveal in two presses), then the stage.
   function nextStep() {
+    if (atEnd()) return; // final stage fully revealed — don't loop back and re-reveal the match
     if (subStep < (STAGE_SUBSTEPS[stageIdx] || 1) - 1) { subStep++; if (stageData) stageData.subStep = subStep; animateStage(); }
     else showStage(stageIdx + 1);
+    updateNav();
   }
   function prevStep() {
+    if (atStart()) return;
     if (subStep > 0) { subStep--; if (stageData) stageData.subStep = subStep; animateStage(); }
     else showStage(stageIdx - 1);
+    updateNav();
   }
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
