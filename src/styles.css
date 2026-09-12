@@ -25,6 +25,16 @@ button.secondary { background: #23233a; }
   align-items: center; justify-content: center; gap: 22px; background: #0a0a12; z-index: 10; }
 #start h1 { font-size: 42px; } #start .modes { display: flex; gap: 20px; align-items: center; }
 #start .startbtns { display: flex; gap: 12px; }
+#cannedPicker { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+#songCards { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 860px; }
+.songCard { background: #16162a; border: 2px solid transparent; border-radius: 12px; padding: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; color: #e8e8f0; }
+.songCard .thumb { width: 104px; height: 104px; border-radius: 8px; object-fit: cover; background: #23233a;
+  display: flex; align-items: center; justify-content: center; font-size: 42px; }
+.songCard .t { font-size: 16px; font-weight: 600; text-align: center; line-height: 1.15; max-width: 112px; }
+.songCard .a { font-size: 13px; font-weight: 500; color: #9a9ac8; text-align: center; max-width: 112px; }
+.songCard:hover { border-color: #3a3a5a; }
+.songCard.selected { border-color: #4be0c0; background: #1c2b2b; }
 #status { color: #9a9ac8; font-size: 19px; min-height: 24px; }
 #normToggle { color: #9a9ac8; font-size: 18px; display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
 #normToggle input { width: 18px; height: 18px; cursor: pointer; }

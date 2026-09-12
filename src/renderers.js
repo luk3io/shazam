@@ -362,8 +362,15 @@
         ctx.globalAlpha = win ? 1 : 0.55; ctx.fillStyle = colorFor(b.songId);
         ctx.fillRect(bx, y + 20, bw, bh); ctx.globalAlpha = 1;
         if (win) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(bx, y + 20, bw, bh); }
+        // album thumbnail top-left (when the tile is tall enough); the title sits to its right
+        const bim = root.__songArt && root.__songArt[b.songId], thumb = Math.min(52, bh - 44);
+        let titleX = bx + 8, titleW = bw - 14, titleY = y + 42;
+        if (bim && bim.complete && bim.naturalWidth && thumb >= 24) {
+          ctx.drawImage(bim, bx + 8, y + 28, thumb, thumb);
+          titleX = bx + 8 + thumb + 8; titleW = bw - thumb - 24; titleY = y + 28 + thumb / 2 + 7;
+        }
         ctx.fillStyle = '#0a0a12'; ctx.font = 'bold 19px system-ui';
-        ctx.fillText(fitText(ctx, titleOf(b.songId), bw - 14), bx + 8, y + 42);
+        ctx.fillText(fitText(ctx, titleOf(b.songId), titleW), titleX, titleY);
         ctx.font = '18px system-ui';
         ctx.fillText(`in song: ${F2S(b.tSong).toFixed(1)}s`, bx + 8, y + 20 + bh - 28);
         ctx.fillStyle = win ? '#fff' : '#0a0a12'; ctx.font = 'bold 18px system-ui';
@@ -447,10 +454,13 @@
         const mm = Math.floor(startSec / 60), ss = Math.round(startSec % 60);
         const startStr = mm + ':' + String(ss).padStart(2, '0');
         ctx.fillStyle = colorFor(best.songId); ctx.fillRect(cX, bannerY, cW, 64);
+        const mim = root.__songArt && root.__songArt[best.songId];
+        let tx = cX + 12, tw = cW - 24;
+        if (mim && mim.complete && mim.naturalWidth) { ctx.drawImage(mim, cX + 8, bannerY + 8, 48, 48); tx = cX + 66; tw = cW - 78; }
         ctx.fillStyle = '#0a0a12'; ctx.font = 'bold 28px system-ui';
-        ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist}`, cW - 24), cX + 12, bannerY + 30);
+        ctx.fillText(fitText(ctx, `✓ MATCH: ${d.matchedSong.title} — ${d.matchedSong.artist}`, tw), tx, bannerY + 30);
         ctx.font = 'bold 21px system-ui';
-        ctx.fillText(fitText(ctx, `${best.score} votes · recording started ~${startStr} into the song`, cW - 24), cX + 12, bannerY + 56);
+        ctx.fillText(fitText(ctx, `${best.score} votes · recording started ~${startStr} into the song`, tw), tx, bannerY + 56);
       } else if (d.bestGuessSong && best) {
         // spike didn't clearly stand out → not confident; show Not found + the closest guess anyway
         ctx.fillStyle = '#3a2f1a'; ctx.fillRect(cX, bannerY, cW, 64);

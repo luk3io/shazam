@@ -113,6 +113,7 @@
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
   let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
+  let selectedSongId = null; // which song the canned-mode picker has selected
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
@@ -356,10 +357,15 @@
     showStage(0);
   }
 
+  function selectSong(id) {
+    selectedSongId = id;
+    document.querySelectorAll('#songCards .songCard').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+  }
+
   async function runCanned() {
     IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
     await dbReady;
-    const s = root.SONGS.find(x => x.id === $('songSelect').value) || root.SONGS[0];
+    const s = root.SONGS.find(x => x.id === selectedSongId) || root.SONGS[0];
     // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
     if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
     precompute(IO.sliceSeconds(s._pcm, 30, 10));
@@ -368,10 +374,21 @@
 
   function initUI() {
     canvas = $('stageCanvas'); ctx = canvas.getContext('2d');
+    // Canned-mode song picker: a card per song (album art + title), click to select.
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     root.SONGS.forEach(s => {
-      const o = document.createElement('option'); o.value = s.id;
-      o.textContent = `${s.artist} — ${s.title}`; $('songSelect').appendChild(o);
+      const card = document.createElement('button');
+      card.className = 'songCard'; card.dataset.id = s.id;
+      const thumb = s.art ? `<img class="thumb" src="${s.art}" alt="" />` : `<div class="thumb ph">🎵</div>`;
+      card.innerHTML = `${thumb}<span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span>`;
+      card.onclick = () => selectSong(s.id);
+      $('songCards').appendChild(card);
     });
+    if (root.SONGS[0]) selectSong(root.SONGS[0].id);
+    // Preload album art as Image objects so the canvas renderers (matching tiles, match banner) can
+    // draw them immediately by the time the pipeline reaches the matching stage.
+    root.__songArt = {};
+    root.SONGS.forEach(s => { if (s.art) { const im = new Image(); im.src = s.art; root.__songArt[s.id] = im; } });
     renderTracker();
     // Start building the DB immediately, in the background, so it is ready by demo time. Uses the
     // IndexedDB cache when it matches the current songs (instant), otherwise fingerprints and caches.

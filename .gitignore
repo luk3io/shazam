@@ -5,5 +5,8 @@
 /shazam-demo.html
 /dist/
 
+# Cached album-art lookups (rebuilt from the iTunes API on demand)
+/art-cache.json
+
 # Node
 node_modules/
