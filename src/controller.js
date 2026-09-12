@@ -11,10 +11,10 @@
     return new Worker(URL.createObjectURL(blob));
   }
 
-  // Decode each song on the main thread, fingerprint it in the worker, and build the DB.
-  // Resilient to a single bad song: skip it (console.warn) and keep going, so a corrupt
-  // file or worker hiccup on one track doesn't brick the whole demo.
-  async function loadDatabase(songs, onProgress) {
+  // Decode each song on the main thread and fingerprint it in the worker. Returns the per-song
+  // fingerprint lists. Resilient to a single bad song: skip it (console.warn) and keep going, so a
+  // corrupt file or worker hiccup on one track doesn't brick the whole demo.
+  async function fingerprintSongs(songs, onProgress) {
     const worker = makeWorker();
     const perSong = [];
     for (let i = 0; i < songs.length; i++) {
@@ -35,9 +35,67 @@
     }
     worker.terminate();
     if (perSong.length === 0) throw new Error('No songs loaded successfully');
-    return D.buildDatabase(perSong);
+    return perSong;
   }
-  root.App = { loadDatabase, makeWorker };
+  async function loadDatabase(songs, onProgress) { // (used by the self-test) build straight from source
+    return D.buildDatabase(await fingerprintSongs(songs, onProgress));
+  }
+
+  // --- Persistent fingerprint cache (IndexedDB) ---------------------------------------------------
+  // Fingerprinting every song on each load is the slow part before "Ready ✓". We cache the per-song
+  // fingerprints in IndexedDB, keyed by a signature of the current song set, so a reload rebuilds the
+  // DB instantly (just the cheap buildDatabase step) and skips decode + FFTs. Rebuilding
+  // shazam-demo.html with different songs changes the signature → the cache auto-refreshes. Every call
+  // is guarded: if IndexedDB is unavailable (some file:// setups), we simply rebuild as before.
+  const IDB_DB = 'shazam-demo', IDB_STORE = 'kv', IDB_KEY = 'fingerprintDB';
+  function idbReq(makeRequest) {
+    return new Promise((res, rej) => {
+      let open;
+      try { open = indexedDB.open(IDB_DB, 1); } catch (e) { return rej(e); }
+      open.onupgradeneeded = () => open.result.createObjectStore(IDB_STORE);
+      open.onerror = () => rej(open.error);
+      open.onsuccess = () => {
+        try {
+          const db = open.result, r = makeRequest(db);
+          r.onsuccess = () => { res(r.result); db.close(); };
+          r.onerror = () => { rej(r.error); db.close(); };
+        } catch (e) { rej(e); }
+      };
+    });
+  }
+  const idbGet = key => idbReq(db => db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key));
+  const idbPut = (key, val) => idbReq(db => db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(val, key));
+  const idbDel = key => idbReq(db => db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).delete(key));
+  // Signature that changes whenever the embedded song set changes (swap / re-encode / add / remove).
+  const dbSignature = songs => songs.map(s => `${s.id}:${s.title || ''}:${(s.data || '').length}`).join('|');
+  // Compact per-song fingerprints for storage: parallel typed arrays clone far faster than {hash,t} objects.
+  const toCompact = perSong => perSong.map(ps => ({
+    songId: ps.songId,
+    hashes: Uint32Array.from(ps.fingerprints, f => f.hash),
+    ts: Uint32Array.from(ps.fingerprints, f => f.t),
+  }));
+  function buildDatabaseFromCompact(compact) {
+    const db = new Map();
+    for (const { songId, hashes, ts } of compact)
+      for (let i = 0; i < hashes.length; i++) {
+        let arr = db.get(hashes[i]); if (!arr) { arr = []; db.set(hashes[i], arr); }
+        arr.push({ songId, t: ts[i] });
+      }
+    return db;
+  }
+  // Load the fingerprint DB, using the cache when it matches the current songs. Returns { db, cached }.
+  async function loadDatabaseCached(songs, onProgress) {
+    const sig = dbSignature(songs);
+    try {
+      const hit = await idbGet(IDB_KEY);
+      if (hit && hit.sig === sig && hit.compact && hit.compact.length) return { db: buildDatabaseFromCompact(hit.compact), cached: true };
+    } catch (e) { /* no cache / IndexedDB unavailable → rebuild below */ }
+    const perSong = await fingerprintSongs(songs, onProgress);
+    try { await idbPut(IDB_KEY, { sig, compact: toCompact(perSong) }); } catch (e) { console.warn('Could not cache fingerprint DB:', e); }
+    return { db: D.buildDatabase(perSong), cached: false };
+  }
+  const clearDatabaseCache = () => idbDel(IDB_KEY).catch(() => {});
+  root.App = { loadDatabase, loadDatabaseCached, clearDatabaseCache, makeWorker };
 
   const STAGES = [
     ['waveform',     'A microphone records the song as a waveform — air pressure over time.'],
@@ -293,6 +351,8 @@
     IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
     await dbReady;
     const s = root.SONGS.find(x => x.id === $('songSelect').value) || root.SONGS[0];
+    // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
+    if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
     precompute(IO.sliceSeconds(s._pcm, 30, 10));
     enterPipeline();
   }
@@ -304,11 +364,22 @@
       o.textContent = `${s.artist} — ${s.title}`; $('songSelect').appendChild(o);
     });
     renderTracker();
-    // Start building the DB immediately, in the background, so it is ready by demo time.
-    $('modeLive').disabled = $('modeCanned').disabled = true;
-    dbReady = root.App.loadDatabase(root.SONGS, () => {})
-      .then(d => { db = d; $('status').textContent = 'Ready ✓'; $('modeLive').disabled = $('modeCanned').disabled = false; })
-      .catch(err => { $('status').textContent = 'Database error: ' + err.message; });
+    // Start building the DB immediately, in the background, so it is ready by demo time. Uses the
+    // IndexedDB cache when it matches the current songs (instant), otherwise fingerprints and caches.
+    const setBusy = busy => { $('modeLive').disabled = $('modeCanned').disabled = $('resetDbBtn').disabled = busy; };
+    const buildDb = () => {
+      setBusy(true);
+      return root.App.loadDatabaseCached(root.SONGS, pct => { $('status').textContent = `Fingerprinting… ${pct}%`; })
+        .then(({ db: d, cached }) => { db = d; $('status').textContent = cached ? 'Ready ✓ (cached)' : 'Ready ✓'; setBusy(false); })
+        .catch(err => { $('status').textContent = 'Database error: ' + err.message; setBusy(false); });
+    };
+    dbReady = buildDb();
+    $('resetDbBtn').onclick = async () => {
+      $('status').textContent = 'Clearing cache…';
+      await root.App.clearDatabaseCache();
+      root.SONGS.forEach(s => { delete s._pcm; }); // force a fresh decode too
+      dbReady = buildDb();
+    };
 
     $('modeCanned').onclick = () => runCanned();
     $('modeLive').onclick = () => enableMicFlow();
