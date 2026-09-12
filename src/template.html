@@ -16,15 +16,24 @@
     <canvas id="stageCanvas"></canvas>
     <div id="start">
       <h1>How Shazam Works</h1>
-      <div class="modes">
-        <button id="modeLive">🎤 Enable microphone</button>
-        <button id="recordBtn" class="hidden">● Record &amp; identify</button>
+      <div id="modeTabs">
+        <button class="modeTab" id="tabMic">🎤 Microphone</button>
+        <button class="modeTab" id="tabLibrary">📚 Library</button>
       </div>
-      <div id="cannedPicker">
+      <div id="library">
+        <div id="libraryTitle"></div>
         <div id="songCards"></div>
-        <button id="modeCanned">▶ Canned playback</button>
       </div>
-      <label id="normToggle"><input type="checkbox" id="normChk" checked /> Even out recording volume (normalize)</label>
+      <div id="micMode" class="modepane">
+        <div class="modes">
+          <button id="modeLive">🎤 Enable microphone</button>
+          <button id="recordBtn" class="hidden">● Record &amp; identify</button>
+        </div>
+        <label id="normToggle"><input type="checkbox" id="normChk" checked /> Even out recording volume (normalize)</label>
+      </div>
+      <div id="libMode" class="modepane hidden">
+        <button id="modeCanned">▶ Play selected song</button>
+      </div>
       <div id="status">Preparing song database…</div>
       <div class="startbtns">
         <button class="secondary" id="fsBtn">⛶ Fullscreen</button>

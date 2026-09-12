@@ -113,7 +113,8 @@
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
   let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
-  let selectedSongId = null; // which song the canned-mode picker has selected
+  let selectedSongId = null; // which song the Library picker has selected
+  let mode = 'mic';          // start-screen mode: 'mic' (record) or 'library' (pick a song)
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
@@ -365,9 +366,25 @@
     showStage(0);
   }
 
-  function selectSong(id) {
-    selectedSongId = id;
-    document.querySelectorAll('#songCards .songCard').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+  // Highlight the selected library card — but only in Library mode (in Microphone mode the library is
+  // shown for reference only, so nothing is "selected").
+  function applyCardHighlights() {
+    document.querySelectorAll('#songCards .songCard').forEach(el =>
+      el.classList.toggle('selected', mode === 'library' && el.dataset.id === selectedSongId));
+  }
+  function selectSong(id) { selectedSongId = id; applyCardHighlights(); }
+  function setMode(m) {
+    mode = m;
+    $('tabMic').classList.toggle('active', m === 'mic');
+    $('tabLibrary').classList.toggle('active', m === 'library');
+    $('micMode').classList.toggle('hidden', m !== 'mic');
+    $('libMode').classList.toggle('hidden', m !== 'library');
+    $('songCards').classList.toggle('selectable', m === 'library'); // cards clickable only in Library mode
+    $('libraryTitle').textContent = m === 'library'
+      ? '🎵 Library — pick a song to identify'
+      : '🎵 Library — the songs I can recognise';
+    if (m === 'library' && !selectedSongId && root.SONGS[0]) selectedSongId = root.SONGS[0].id;
+    applyCardHighlights();
   }
 
   async function runCanned() {
@@ -389,10 +406,13 @@
       card.className = 'songCard'; card.dataset.id = s.id;
       const thumb = s.art ? `<img class="thumb" src="${s.art}" alt="" />` : `<div class="thumb ph">🎵</div>`;
       card.innerHTML = `${thumb}<span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span>`;
-      card.onclick = () => selectSong(s.id);
+      card.onclick = () => { if (mode === 'library') selectSong(s.id); };
       $('songCards').appendChild(card);
     });
-    if (root.SONGS[0]) selectSong(root.SONGS[0].id);
+    selectedSongId = root.SONGS[0] ? root.SONGS[0].id : null;
+    $('tabMic').onclick = () => setMode('mic');
+    $('tabLibrary').onclick = () => setMode('library');
+    setMode('mic'); // default to Microphone mode (library shown for reference, not selectable)
     // Preload album art as Image objects so the canvas renderers (matching tiles, match banner) can
     // draw them immediately by the time the pipeline reaches the matching stage.
     root.__songArt = {};
