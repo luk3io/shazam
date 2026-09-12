@@ -252,6 +252,7 @@
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
+    $('stopRecBtn').classList.add('hidden');
     $('homeBtn').classList.add('hidden');
     // Reset the live flow back to step 1 (mic released → must be re-enabled).
     $('recordBtn').classList.add('hidden');
@@ -340,13 +341,20 @@
       for (let i = 0; i < pts.length; i++) { const x = pts[i].f * W, y = mid + pts[i].v * amp; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
       ctx.stroke();
     };
+    // Stop button: bail out of a recording started too early (e.g. before the song) → back to start.
+    $('stopRecBtn').classList.remove('hidden');
+    $('stopRecBtn').onclick = () => IO.cancelCapture();
     let pcm;
     try {
       // captureMicStreaming records via MediaRecorder and returns mono PCM at the DSP rate.
       pcm = await IO.captureMicStreaming(10, onWindow, onLevel);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return goHome(); // stopped early — discard and return to start
+      throw err;
     } finally {
       clearInterval(countdown);
       $('levelMeter').classList.add('hidden');
+      $('stopRecBtn').classList.add('hidden');
     }
     $('caption').textContent = 'Analysing…';
     if ($('normChk') && $('normChk').checked) pcm = IO.normalizeRecording(pcm); // flatten fade + lift quiet captures

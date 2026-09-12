@@ -113,7 +113,13 @@
       if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
     };
     rec.start(1000); const timer = setInterval(poll, 40); poll(); // flush the recording every second
-    await new Promise(res => setTimeout(res, seconds * 1000));
+    // Wait the full window, but let cancelCapture() end it early (e.g. Stop pressed before the song).
+    let cancelled = false;
+    await new Promise(res => {
+      const finish = () => { clearTimeout(to); cancelCurrent = null; res(); };
+      const to = setTimeout(finish, seconds * 1000);
+      cancelCurrent = () => { cancelled = true; finish(); };
+    });
     clearInterval(timer);
     try { rec.stop(); } catch (e) {}
     await stopped;
@@ -121,8 +127,12 @@
     // session in "communications" mode and DUCKS other output — which silenced the Play-clip
     // playback during the stages. We already have the recorded blob, so the mic is no longer needed.
     stopMic();
+    if (cancelled) throw Object.assign(new Error('recording cancelled'), { name: 'AbortError' });
     return decodeToMono(await new Blob(blobs).arrayBuffer()); // decode the recording -> mono PCM @ DSP rate
   }
+  // Set while a capture is in flight; call cancelCapture() to end the current recording early.
+  let cancelCurrent = null;
+  function cancelCapture() { if (cancelCurrent) cancelCurrent(); }
 
   // Even up a recording's loudness over time so a mic that fades on a sustained song (Windows driver
   // AGC, which we can't disable from JS) and a generally-quiet capture both come back to a consistent,
@@ -180,5 +190,5 @@
     };
   }
 
-  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, normalizeRecording, makeSource };
+  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, cancelCapture, normalizeRecording, makeSource };
 })(typeof self !== 'undefined' ? self : this);
