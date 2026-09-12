@@ -147,6 +147,7 @@
     anim = requestAnimationFrame(tick);
   }
   // "Play clip" button: lets the audience hear the recording they're looking at.
+  // Full stop + reset — used when playback ends naturally, and when leaving the stage / going home.
   function stopPlayback() {
     if (playSource) { playSource.stop(); playSource = null; }
     cancelAnimationFrame(playAnim);
@@ -155,6 +156,12 @@
     savedFocus = null;
     if (stageData) { stageData.playhead = null; if (isPlayable(stageIdx)) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
+  }
+  // Pause — keep the clip and the playhead/slice exactly where they are so Play resumes from here.
+  function pausePlayback() {
+    if (playSource) playSource.pause();
+    cancelAnimationFrame(playAnim);
+    $('playBtn').textContent = '▶ Resume';
   }
   // While the clip plays, advance a playback cursor each frame. On the waveform stage that's the
   // cursor line; on the Fourier stage the analysed slice follows the playhead instead, so its
@@ -444,12 +451,13 @@
     $('fsBtn').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
     $('playBtn').onclick = () => {
       if (!stageData) return;
-      if (playSource) { stopPlayback(); return; }
+      if (playSource && playSource.isPlaying()) { pausePlayback(); return; }          // playing → pause here
+      if (playSource) { playSource.resume(); $('playBtn').textContent = '⏸ Pause'; startPlayheadLoop(); return; } // paused → resume
       cancelAnimationFrame(anim); // stop any in-progress stage reveal so the playhead drives the view
-      savedFocus = (PLAYHEAD[stageIdx] === 'slice') ? stageData.focusFrame : null; // remember the slice to return to
+      savedFocus = (PLAYHEAD[stageIdx] === 'slice') ? stageData.focusFrame : null; // slice to return to when it finishes
       playSource = IO.makeSource(stageData.pcm, stageData.sr);
       playSource.play();
-      $('playBtn').textContent = '■ Stop clip';
+      $('playBtn').textContent = '⏸ Pause';
       startPlayheadLoop();
     };
     $('homeBtn').onclick = () => goHome();

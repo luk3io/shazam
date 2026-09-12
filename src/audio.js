@@ -168,25 +168,35 @@
     return out;
   }
 
+  // A playable clip that supports pause/resume. A BufferSource can't be paused, so pausing records the
+  // offset and stops the node; resuming starts a fresh node from that offset (start(0, offset)).
   function makeSource(pcm, sr = SR()) {
     const Ctx = root.AudioContext || root.webkitAudioContext;
-    let ac = null, node = null, startedAt = 0, ended = false;
+    const dur = pcm.length / sr;
+    let ac = null, node = null, startedAt = 0, offset = 0, playing = false, ended = false;
+    function ensureCtx() {
+      if (!ac) ac = new Ctx();
+      // A freshly created AudioContext can start "suspended" under the browser's autoplay policy;
+      // resume() (safe to call from a click handler) makes it audible.
+      if (ac.state === 'suspended' && ac.resume) ac.resume();
+    }
+    function startAt(off) {
+      ensureCtx();
+      const b = ac.createBuffer(1, pcm.length, sr); b.copyToChannel(pcm, 0);
+      node = ac.createBufferSource(); node.buffer = b; node.connect(ac.destination);
+      node.onended = () => { if (playing) { playing = false; ended = true; offset = 0; } }; // natural end
+      startedAt = ac.currentTime - off; node.start(0, off); playing = true; ended = false;
+    }
+    function stopNode() { if (node) { node.onended = null; try { node.stop(); } catch (e) {} node = null; } }
     return {
-      duration: pcm.length / sr,
-      play() {
-        ac = new Ctx();
-        // A freshly created AudioContext can start "suspended" under the browser's
-        // autoplay policy; resume() (safe to call from the click handler) makes it audible.
-        if (ac.state === 'suspended' && ac.resume) ac.resume();
-        const b = ac.createBuffer(1, pcm.length, sr);
-        b.copyToChannel(pcm, 0);
-        node = ac.createBufferSource(); node.buffer = b;
-        node.onended = () => { ended = true; };
-        node.connect(ac.destination); startedAt = ac.currentTime; node.start();
-      },
-      elapsed() { return ac ? Math.max(0, ac.currentTime - startedAt) : 0; }, // seconds played
+      duration: dur,
+      play() { offset = 0; startAt(0); },                                    // (re)start from the beginning
+      resume() { if (playing) return; if (offset >= dur - 0.01) offset = 0; startAt(offset); }, // continue
+      pause() { if (!playing) return; offset = Math.min(dur, ac.currentTime - startedAt); stopNode(); playing = false; },
+      elapsed() { return playing && ac ? Math.max(0, ac.currentTime - startedAt) : offset; }, // seconds in
+      isPlaying() { return playing; },
       isEnded() { return ended; },
-      stop() { try { node && node.stop(); ac && ac.close(); } catch (e) {} ended = true; },
+      stop() { stopNode(); try { ac && ac.close(); } catch (e) {} ac = null; playing = false; ended = true; offset = 0; },
     };
   }
 
