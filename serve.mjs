@@ -4,10 +4,11 @@
 // the persistent fingerprint cache (IndexedDB) and avoids file:// quirks.
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { extname, resolve } from 'node:path';
+import { extname, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = process.env.PORT || 8000;
-const ROOT = process.cwd();
+const ROOT = dirname(fileURLToPath(import.meta.url)); // the repo folder, wherever this script lives
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
