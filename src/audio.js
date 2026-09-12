@@ -193,6 +193,7 @@
       play() { offset = 0; startAt(0); },                                    // (re)start from the beginning
       resume() { if (playing) return; if (offset >= dur - 0.01) offset = 0; startAt(offset); }, // continue
       pause() { if (!playing) return; offset = Math.min(dur, ac.currentTime - startedAt); stopNode(); playing = false; },
+      seek(t) { offset = Math.max(0, Math.min(dur, t)); if (playing) { stopNode(); startAt(offset); } }, // jump to t (keeps playing/paused state)
       elapsed() { return playing && ac ? Math.max(0, ac.currentTime - startedAt) : offset; }, // seconds in
       isPlaying() { return playing; },
       isEnded() { return ended; },

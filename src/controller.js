@@ -474,7 +474,7 @@
     });
     // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
     // (Stage 2) to move which ~93 ms slice gets analysed.
-    let dragging = false;
+    let dragging = false, dragWasPlaying = false;
     const SLICE_PAD = 40; // must match the `pad` used in Renderers.fourier's minimap
     function frameFromEvent(e) {
       if (!stageData) return null;
@@ -497,12 +497,25 @@
       stageData.focusFrame = f; draw(1);
     }
     canvas.addEventListener('mousedown', e => {
-      if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; stopPlayback(); cancelAnimationFrame(anim); applyFocus(e); }
-      else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
+      if ((stageIdx === 0 || stageIdx === 1) && stageData) {
+        if (stageIdx === 1 && frameFromEvent(e) == null) return; // only the minimap band is draggable
+        dragging = true; cancelAnimationFrame(anim);
+        // On Fourier the slice IS the playhead — pause the audio so we can scrub it, resume on release.
+        if (stageIdx === 1 && playSource) { dragWasPlaying = playSource.isPlaying(); playSource.pause(); cancelAnimationFrame(playAnim); }
+        applyFocus(e);
+      } else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
     });
     canvas.addEventListener('mousemove', e => { if (dragging) applyFocus(e); });
-    window.addEventListener('mouseup', () => { dragging = false; });
-    canvas.addEventListener('mouseleave', () => { dragging = false; });
+    window.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      // Finish a Fourier scrub: move playback to the slice and continue from there (no restart).
+      if (stageIdx === 1 && playSource) {
+        playSource.seek(stageData.focusFrame * D.CONFIG.hopSize / stageData.sr);
+        if (dragWasPlaying) { playSource.resume(); $('playBtn').textContent = '⏸ Pause'; startPlayheadLoop(); }
+      }
+      dragWasPlaying = false;
+    });
     window.addEventListener('resize', resize);
     resize();
   }
