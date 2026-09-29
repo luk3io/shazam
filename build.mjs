@@ -15,6 +15,44 @@ const songs = files.map((f, i) => {
     data: readFileSync(join(SONGS_DIR, f)).toString('base64') };
 });
 
+// --- Album art -------------------------------------------------------------------------------------
+// Look each song up on the iTunes Search API at build time and embed the album thumbnail as a data
+// URI, so the demo stays fully offline at run time (no CORS, no network needed to present). Results
+// are cached in art-cache.json (gitignored) to keep rebuilds fast and offline. A miss just leaves
+// art:null and the UI falls back to a coloured placeholder.
+const ART_CACHE = 'art-cache.json';
+let artCache = {};
+try { artCache = JSON.parse(readFileSync(ART_CACHE, 'utf8')); } catch {}
+
+async function fetchWithTimeout(url, ms) {
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), ms);
+  try { return await fetch(url, { signal: ac.signal }); } finally { clearTimeout(timer); }
+}
+async function fetchArt(artist, title) {
+  const term = encodeURIComponent(`${artist} ${title}`.trim());
+  const res = await fetchWithTimeout(`https://itunes.apple.com/search?term=${term}&entity=song&limit=1`, 8000);
+  const found = (await res.json()).results?.[0];
+  if (!found?.artworkUrl100) return null;
+  const img = await fetchWithTimeout(found.artworkUrl100.replace('100x100bb', '300x300bb'), 8000);
+  const buf = Buffer.from(await img.arrayBuffer());
+  return `data:${img.headers.get('content-type') || 'image/jpeg'};base64,${buf.toString('base64')}`;
+}
+
+let embedded = 0, missing = 0;
+for (const s of songs) {
+  const key = `${s.artist} - ${s.title}`;
+  if (key in artCache) { s.art = artCache[key]; }
+  else {
+    try { s.art = await fetchArt(s.artist, s.title); }
+    catch (e) { s.art = null; console.warn(`  album art error for "${key}": ${e.message}`); }
+    if (!s.art) console.warn(`  no album art found for "${key}"`);
+    artCache[key] = s.art || null;
+  }
+  s.art ? embedded++ : missing++;
+}
+try { writeFileSync(ART_CACHE, JSON.stringify(artCache)); } catch {}
+console.log(`Album art: ${embedded} embedded${missing ? `, ${missing} missing (placeholder)` : ''}`);
+
 const read = p => readFileSync(p, 'utf8');
 // The worker script = dsp.js (defines self.DSP) + worker.js handler, embedded as a JS string.
 const workerSource = read('src/dsp.js') + '\n' + read('src/worker.js');

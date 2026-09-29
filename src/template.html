@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>How Shazam Works</title>
+<title>Luke's Shazammer</title>
 <style>/*__STYLES__*/</style>
 </head>
 <body>
@@ -15,23 +15,36 @@
   <div id="stage">
     <canvas id="stageCanvas"></canvas>
     <div id="start">
-      <h1>How Shazam Works</h1>
-      <div class="modes">
-        <button id="modeLive">🎤 Enable microphone</button>
-        <button id="recordBtn" class="hidden">● Record &amp; identify</button>
-        <div>
-          <select id="songSelect"></select>
-          <button id="modeCanned">▶ Canned playback</button>
-        </div>
+      <h1>Luke's Shazammer</h1>
+      <div id="modeTabs">
+        <button class="modeTab" id="tabMic">🎤 Microphone</button>
+        <button class="modeTab" id="tabLibrary">📚 Library</button>
       </div>
-      <label id="normToggle"><input type="checkbox" id="normChk" checked /> Even out recording volume (normalize)</label>
+      <div id="library">
+        <div id="libraryTitle"></div>
+        <div id="songCards"></div>
+      </div>
+      <div id="micMode" class="modepane">
+        <div class="modes">
+          <button id="modeLive">🎤 Enable microphone</button>
+          <button id="recordBtn" class="hidden">● Record &amp; identify</button>
+        </div>
+        <label id="normToggle"><input type="checkbox" id="normChk" checked /> Even out recording volume (normalize)</label>
+      </div>
+      <div id="libMode" class="modepane hidden">
+        <button id="modeCanned">▶ Play selected song</button>
+      </div>
       <div id="status">Preparing song database…</div>
-      <button class="secondary" id="fsBtn">⛶ Fullscreen</button>
+      <div class="startbtns">
+        <button class="secondary" id="fsBtn">⛶ Fullscreen</button>
+        <button class="secondary" id="resetDbBtn">↻ Rebuild database</button>
+      </div>
     </div>
     <div id="loading">Analysing… <span id="loadPct"></span></div>
     <div id="levelMeter" class="hidden"><div id="levelBar"></div></div>
   </div>
   <div id="caption"></div>
+  <button id="stopRecBtn" class="hidden">■ Stop</button>
   <div id="controls" class="hidden">
     <button class="secondary hidden" id="playBtn">▶ Play clip</button>
     <button class="secondary hidden" id="fpModeBtn">⇄ View: Spread</button>

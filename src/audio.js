@@ -113,7 +113,13 @@
       if (onLevel) { let pk = 0; for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; } onLevel(pk); }
     };
     rec.start(1000); const timer = setInterval(poll, 40); poll(); // flush the recording every second
-    await new Promise(res => setTimeout(res, seconds * 1000));
+    // Wait the full window, but let cancelCapture() end it early (e.g. Stop pressed before the song).
+    let cancelled = false;
+    await new Promise(res => {
+      const finish = () => { clearTimeout(to); cancelCurrent = null; res(); };
+      const to = setTimeout(finish, seconds * 1000);
+      cancelCurrent = () => { cancelled = true; finish(); };
+    });
     clearInterval(timer);
     try { rec.stop(); } catch (e) {}
     await stopped;
@@ -121,8 +127,12 @@
     // session in "communications" mode and DUCKS other output — which silenced the Play-clip
     // playback during the stages. We already have the recorded blob, so the mic is no longer needed.
     stopMic();
+    if (cancelled) throw Object.assign(new Error('recording cancelled'), { name: 'AbortError' });
     return decodeToMono(await new Blob(blobs).arrayBuffer()); // decode the recording -> mono PCM @ DSP rate
   }
+  // Set while a capture is in flight; call cancelCapture() to end the current recording early.
+  let cancelCurrent = null;
+  function cancelCapture() { if (cancelCurrent) cancelCurrent(); }
 
   // Even up a recording's loudness over time so a mic that fades on a sustained song (Windows driver
   // AGC, which we can't disable from JS) and a generally-quiet capture both come back to a consistent,
@@ -158,27 +168,38 @@
     return out;
   }
 
+  // A playable clip that supports pause/resume. A BufferSource can't be paused, so pausing records the
+  // offset and stops the node; resuming starts a fresh node from that offset (start(0, offset)).
   function makeSource(pcm, sr = SR()) {
     const Ctx = root.AudioContext || root.webkitAudioContext;
-    let ac = null, node = null, startedAt = 0, ended = false;
+    const dur = pcm.length / sr;
+    let ac = null, node = null, startedAt = 0, offset = 0, playing = false, ended = false;
+    function ensureCtx() {
+      if (!ac) ac = new Ctx();
+      // A freshly created AudioContext can start "suspended" under the browser's autoplay policy;
+      // resume() (safe to call from a click handler) makes it audible.
+      if (ac.state === 'suspended' && ac.resume) ac.resume();
+    }
+    function startAt(off) {
+      ensureCtx();
+      const b = ac.createBuffer(1, pcm.length, sr); b.copyToChannel(pcm, 0);
+      node = ac.createBufferSource(); node.buffer = b; node.connect(ac.destination);
+      node.onended = () => { if (playing) { playing = false; ended = true; offset = 0; } }; // natural end
+      startedAt = ac.currentTime - off; node.start(0, off); playing = true; ended = false;
+    }
+    function stopNode() { if (node) { node.onended = null; try { node.stop(); } catch (e) {} node = null; } }
     return {
-      duration: pcm.length / sr,
-      play() {
-        ac = new Ctx();
-        // A freshly created AudioContext can start "suspended" under the browser's
-        // autoplay policy; resume() (safe to call from the click handler) makes it audible.
-        if (ac.state === 'suspended' && ac.resume) ac.resume();
-        const b = ac.createBuffer(1, pcm.length, sr);
-        b.copyToChannel(pcm, 0);
-        node = ac.createBufferSource(); node.buffer = b;
-        node.onended = () => { ended = true; };
-        node.connect(ac.destination); startedAt = ac.currentTime; node.start();
-      },
-      elapsed() { return ac ? Math.max(0, ac.currentTime - startedAt) : 0; }, // seconds played
+      duration: dur,
+      play() { offset = 0; startAt(0); },                                    // (re)start from the beginning
+      resume() { if (playing) return; if (offset >= dur - 0.01) offset = 0; startAt(offset); }, // continue
+      pause() { if (!playing) return; offset = Math.min(dur, ac.currentTime - startedAt); stopNode(); playing = false; },
+      seek(t) { offset = Math.max(0, Math.min(dur, t)); if (playing) { stopNode(); startAt(offset); } }, // jump to t (keeps playing/paused state)
+      elapsed() { return playing && ac ? Math.max(0, ac.currentTime - startedAt) : offset; }, // seconds in
+      isPlaying() { return playing; },
       isEnded() { return ended; },
-      stop() { try { node && node.stop(); ac && ac.close(); } catch (e) {} ended = true; },
+      stop() { stopNode(); try { ac && ac.close(); } catch (e) {} ac = null; playing = false; ended = true; offset = 0; },
     };
   }
 
-  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, normalizeRecording, makeSource };
+  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, cancelCapture, normalizeRecording, makeSource };
 })(typeof self !== 'undefined' ? self : this);

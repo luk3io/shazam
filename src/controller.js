@@ -11,10 +11,10 @@
     return new Worker(URL.createObjectURL(blob));
   }
 
-  // Decode each song on the main thread, fingerprint it in the worker, and build the DB.
-  // Resilient to a single bad song: skip it (console.warn) and keep going, so a corrupt
-  // file or worker hiccup on one track doesn't brick the whole demo.
-  async function loadDatabase(songs, onProgress) {
+  // Decode each song on the main thread and fingerprint it in the worker. Returns the per-song
+  // fingerprint lists. Resilient to a single bad song: skip it (console.warn) and keep going, so a
+  // corrupt file or worker hiccup on one track doesn't brick the whole demo.
+  async function fingerprintSongs(songs, onProgress) {
     const worker = makeWorker();
     const perSong = [];
     for (let i = 0; i < songs.length; i++) {
@@ -35,9 +35,67 @@
     }
     worker.terminate();
     if (perSong.length === 0) throw new Error('No songs loaded successfully');
-    return D.buildDatabase(perSong);
+    return perSong;
   }
-  root.App = { loadDatabase, makeWorker };
+  async function loadDatabase(songs, onProgress) { // (used by the self-test) build straight from source
+    return D.buildDatabase(await fingerprintSongs(songs, onProgress));
+  }
+
+  // --- Persistent fingerprint cache (IndexedDB) ---------------------------------------------------
+  // Fingerprinting every song on each load is the slow part before "Ready ✓". We cache the per-song
+  // fingerprints in IndexedDB, keyed by a signature of the current song set, so a reload rebuilds the
+  // DB instantly (just the cheap buildDatabase step) and skips decode + FFTs. Rebuilding
+  // shazam-demo.html with different songs changes the signature → the cache auto-refreshes. Every call
+  // is guarded: if IndexedDB is unavailable (some file:// setups), we simply rebuild as before.
+  const IDB_DB = 'shazam-demo', IDB_STORE = 'kv', IDB_KEY = 'fingerprintDB';
+  function idbReq(makeRequest) {
+    return new Promise((res, rej) => {
+      let open;
+      try { open = indexedDB.open(IDB_DB, 1); } catch (e) { return rej(e); }
+      open.onupgradeneeded = () => open.result.createObjectStore(IDB_STORE);
+      open.onerror = () => rej(open.error);
+      open.onsuccess = () => {
+        try {
+          const db = open.result, r = makeRequest(db);
+          r.onsuccess = () => { res(r.result); db.close(); };
+          r.onerror = () => { rej(r.error); db.close(); };
+        } catch (e) { rej(e); }
+      };
+    });
+  }
+  const idbGet = key => idbReq(db => db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key));
+  const idbPut = (key, val) => idbReq(db => db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(val, key));
+  const idbDel = key => idbReq(db => db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).delete(key));
+  // Signature that changes whenever the embedded song set changes (swap / re-encode / add / remove).
+  const dbSignature = songs => songs.map(s => `${s.id}:${s.title || ''}:${(s.data || '').length}`).join('|');
+  // Compact per-song fingerprints for storage: parallel typed arrays clone far faster than {hash,t} objects.
+  const toCompact = perSong => perSong.map(ps => ({
+    songId: ps.songId,
+    hashes: Uint32Array.from(ps.fingerprints, f => f.hash),
+    ts: Uint32Array.from(ps.fingerprints, f => f.t),
+  }));
+  function buildDatabaseFromCompact(compact) {
+    const db = new Map();
+    for (const { songId, hashes, ts } of compact)
+      for (let i = 0; i < hashes.length; i++) {
+        let arr = db.get(hashes[i]); if (!arr) { arr = []; db.set(hashes[i], arr); }
+        arr.push({ songId, t: ts[i] });
+      }
+    return db;
+  }
+  // Load the fingerprint DB, using the cache when it matches the current songs. Returns { db, cached }.
+  async function loadDatabaseCached(songs, onProgress) {
+    const sig = dbSignature(songs);
+    try {
+      const hit = await idbGet(IDB_KEY);
+      if (hit && hit.sig === sig && hit.compact && hit.compact.length) return { db: buildDatabaseFromCompact(hit.compact), cached: true };
+    } catch (e) { /* no cache / IndexedDB unavailable → rebuild below */ }
+    const perSong = await fingerprintSongs(songs, onProgress);
+    try { await idbPut(IDB_KEY, { sig, compact: toCompact(perSong) }); } catch (e) { console.warn('Could not cache fingerprint DB:', e); }
+    return { db: D.buildDatabase(perSong), cached: false };
+  }
+  const clearDatabaseCache = () => idbDel(IDB_KEY).catch(() => {});
+  root.App = { loadDatabase, loadDatabaseCached, clearDatabaseCache, makeWorker };
 
   const STAGES = [
     ['waveform',     'A microphone records the song as a waveform — air pressure over time.'],
@@ -54,6 +112,9 @@
   const isPlayable = i => i in PLAYHEAD;
   const $ = id => document.getElementById(id);
   let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
+  let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
+  let selectedSongId = null; // which song the Library picker has selected
+  let mode = 'mic';          // start-screen mode: 'mic' (record) or 'library' (pick a song)
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
 
   function resize() {
@@ -86,11 +147,21 @@
     anim = requestAnimationFrame(tick);
   }
   // "Play clip" button: lets the audience hear the recording they're looking at.
+  // Full stop + reset — used when playback ends naturally, and when leaving the stage / going home.
   function stopPlayback() {
     if (playSource) { playSource.stop(); playSource = null; }
     cancelAnimationFrame(playAnim);
+    // Restore the Fourier slice to where it was before playback moved it along with the playhead.
+    if (savedFocus != null && stageData) stageData.focusFrame = savedFocus;
+    savedFocus = null;
     if (stageData) { stageData.playhead = null; if (isPlayable(stageIdx)) draw(1); } // clear the cursor
     $('playBtn').textContent = '▶ Play clip';
+  }
+  // Pause — keep the clip and the playhead/slice exactly where they are so Play resumes from here.
+  function pausePlayback() {
+    if (playSource) playSource.pause();
+    cancelAnimationFrame(playAnim);
+    $('playBtn').textContent = '▶ Resume';
   }
   // While the clip plays, advance a playback cursor each frame. On the waveform stage that's the
   // cursor line; on the Fourier stage the analysed slice follows the playhead instead, so its
@@ -161,16 +232,25 @@
     $('caption').textContent = STAGES[stageIdx][1];
     subStep = 0;
     if (stageData) { stageData.fpMode = fpMode; stageData.fpSelected = null; stageData.subStep = 0; }
-    renderTracker(); animateStage();
+    renderTracker(); animateStage(); updateNav();
   }
+  // We're at the very end once the final stage (matching) is on its last sub-step — the match is
+  // revealed and there's nowhere further to go. atStart mirrors that for the first stage.
+  const atEnd = () => stageIdx === STAGES.length - 1 && subStep >= (STAGE_SUBSTEPS[stageIdx] || 1) - 1;
+  const atStart = () => stageIdx === 0 && subStep === 0;
+  function updateNav() { $('nextBtn').disabled = atEnd(); $('prevBtn').disabled = atStart(); }
   // Next/Prev advance an internal sub-step first (for stages that reveal in two presses), then the stage.
   function nextStep() {
+    if (atEnd()) return; // final stage fully revealed — don't loop back and re-reveal the match
     if (subStep < (STAGE_SUBSTEPS[stageIdx] || 1) - 1) { subStep++; if (stageData) stageData.subStep = subStep; animateStage(); }
     else showStage(stageIdx + 1);
+    updateNav();
   }
   function prevStep() {
+    if (atStart()) return;
     if (subStep > 0) { subStep--; if (stageData) stageData.subStep = subStep; animateStage(); }
     else showStage(stageIdx - 1);
+    updateNav();
   }
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
@@ -180,6 +260,7 @@
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
+    $('stopRecBtn').classList.add('hidden');
     $('homeBtn').classList.add('hidden');
     // Reset the live flow back to step 1 (mic released → must be re-enabled).
     $('recordBtn').classList.add('hidden');
@@ -268,13 +349,20 @@
       for (let i = 0; i < pts.length; i++) { const x = pts[i].f * W, y = mid + pts[i].v * amp; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
       ctx.stroke();
     };
+    // Stop button: bail out of a recording started too early (e.g. before the song) → back to start.
+    $('stopRecBtn').classList.remove('hidden');
+    $('stopRecBtn').onclick = () => IO.cancelCapture();
     let pcm;
     try {
       // captureMicStreaming records via MediaRecorder and returns mono PCM at the DSP rate.
       pcm = await IO.captureMicStreaming(10, onWindow, onLevel);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return goHome(); // stopped early — discard and return to start
+      throw err;
     } finally {
       clearInterval(countdown);
       $('levelMeter').classList.add('hidden');
+      $('stopRecBtn').classList.add('hidden');
     }
     $('caption').textContent = 'Analysing…';
     if ($('normChk') && $('normChk').checked) pcm = IO.normalizeRecording(pcm); // flatten fade + lift quiet captures
@@ -285,26 +373,74 @@
     showStage(0);
   }
 
+  // Highlight the selected library card — but only in Library mode (in Microphone mode the library is
+  // shown for reference only, so nothing is "selected").
+  function applyCardHighlights() {
+    document.querySelectorAll('#songCards .songCard').forEach(el =>
+      el.classList.toggle('selected', mode === 'library' && el.dataset.id === selectedSongId));
+  }
+  function selectSong(id) { selectedSongId = id; applyCardHighlights(); }
+  function setMode(m) {
+    mode = m;
+    $('tabMic').classList.toggle('active', m === 'mic');
+    $('tabLibrary').classList.toggle('active', m === 'library');
+    $('micMode').classList.toggle('hidden', m !== 'mic');
+    $('libMode').classList.toggle('hidden', m !== 'library');
+    $('songCards').classList.toggle('selectable', m === 'library'); // cards clickable only in Library mode
+    $('libraryTitle').textContent = m === 'library'
+      ? '🎵 Library — pick a song to identify'
+      : '🎵 Library — the songs I can recognise';
+    if (m === 'library' && !selectedSongId && root.SONGS[0]) selectedSongId = root.SONGS[0].id;
+    applyCardHighlights();
+  }
+
   async function runCanned() {
     IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
     await dbReady;
-    const s = root.SONGS.find(x => x.id === $('songSelect').value) || root.SONGS[0];
+    const s = root.SONGS.find(x => x.id === selectedSongId) || root.SONGS[0];
+    // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
+    if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
     precompute(IO.sliceSeconds(s._pcm, 30, 10));
     enterPipeline();
   }
 
   function initUI() {
     canvas = $('stageCanvas'); ctx = canvas.getContext('2d');
+    // Canned-mode song picker: a card per song (album art + title), click to select.
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     root.SONGS.forEach(s => {
-      const o = document.createElement('option'); o.value = s.id;
-      o.textContent = `${s.artist} — ${s.title}`; $('songSelect').appendChild(o);
+      const card = document.createElement('button');
+      card.className = 'songCard'; card.dataset.id = s.id;
+      const thumb = s.art ? `<img class="thumb" src="${s.art}" alt="" />` : `<div class="thumb ph">🎵</div>`;
+      card.innerHTML = `${thumb}<span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span>`;
+      card.onclick = () => { if (mode === 'library') selectSong(s.id); };
+      $('songCards').appendChild(card);
     });
+    selectedSongId = root.SONGS[0] ? root.SONGS[0].id : null;
+    $('tabMic').onclick = () => setMode('mic');
+    $('tabLibrary').onclick = () => setMode('library');
+    setMode('mic'); // default to Microphone mode (library shown for reference, not selectable)
+    // Preload album art as Image objects so the canvas renderers (matching tiles, match banner) can
+    // draw them immediately by the time the pipeline reaches the matching stage.
+    root.__songArt = {};
+    root.SONGS.forEach(s => { if (s.art) { const im = new Image(); im.src = s.art; root.__songArt[s.id] = im; } });
     renderTracker();
-    // Start building the DB immediately, in the background, so it is ready by demo time.
-    $('modeLive').disabled = $('modeCanned').disabled = true;
-    dbReady = root.App.loadDatabase(root.SONGS, () => {})
-      .then(d => { db = d; $('status').textContent = 'Ready ✓'; $('modeLive').disabled = $('modeCanned').disabled = false; })
-      .catch(err => { $('status').textContent = 'Database error: ' + err.message; });
+    // Start building the DB immediately, in the background, so it is ready by demo time. Uses the
+    // IndexedDB cache when it matches the current songs (instant), otherwise fingerprints and caches.
+    const setBusy = busy => { $('modeLive').disabled = $('modeCanned').disabled = $('resetDbBtn').disabled = busy; };
+    const buildDb = () => {
+      setBusy(true);
+      return root.App.loadDatabaseCached(root.SONGS, pct => { $('status').textContent = `Fingerprinting… ${pct}%`; })
+        .then(({ db: d, cached }) => { db = d; $('status').textContent = cached ? 'Ready ✓ (cached)' : 'Ready ✓'; setBusy(false); })
+        .catch(err => { $('status').textContent = 'Database error: ' + err.message; setBusy(false); });
+    };
+    dbReady = buildDb();
+    $('resetDbBtn').onclick = async () => {
+      $('status').textContent = 'Clearing cache…';
+      await root.App.clearDatabaseCache();
+      root.SONGS.forEach(s => { delete s._pcm; }); // force a fresh decode too
+      dbReady = buildDb();
+    };
 
     $('modeCanned').onclick = () => runCanned();
     $('modeLive').onclick = () => enableMicFlow();
@@ -315,11 +451,13 @@
     $('fsBtn').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
     $('playBtn').onclick = () => {
       if (!stageData) return;
-      if (playSource) { stopPlayback(); return; }
+      if (playSource && playSource.isPlaying()) { pausePlayback(); return; }          // playing → pause here
+      if (playSource) { playSource.resume(); $('playBtn').textContent = '⏸ Pause'; startPlayheadLoop(); return; } // paused → resume
       cancelAnimationFrame(anim); // stop any in-progress stage reveal so the playhead drives the view
+      savedFocus = (PLAYHEAD[stageIdx] === 'slice') ? stageData.focusFrame : null; // slice to return to when it finishes
       playSource = IO.makeSource(stageData.pcm, stageData.sr);
       playSource.play();
-      $('playBtn').textContent = '■ Stop clip';
+      $('playBtn').textContent = '⏸ Pause';
       startPlayheadLoop();
     };
     $('homeBtn').onclick = () => goHome();
@@ -336,7 +474,7 @@
     });
     // Interactive slice selection: drag on the waveform (Stage 1) or the Fourier minimap
     // (Stage 2) to move which ~93 ms slice gets analysed.
-    let dragging = false;
+    let dragging = false, dragWasPlaying = false;
     const SLICE_PAD = 40; // must match the `pad` used in Renderers.fourier's minimap
     function frameFromEvent(e) {
       if (!stageData) return null;
@@ -359,12 +497,25 @@
       stageData.focusFrame = f; draw(1);
     }
     canvas.addEventListener('mousedown', e => {
-      if ((stageIdx === 0 || stageIdx === 1) && stageData) { dragging = true; stopPlayback(); cancelAnimationFrame(anim); applyFocus(e); }
-      else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
+      if ((stageIdx === 0 || stageIdx === 1) && stageData) {
+        if (stageIdx === 1 && frameFromEvent(e) == null) return; // only the minimap band is draggable
+        dragging = true; cancelAnimationFrame(anim);
+        // On Fourier the slice IS the playhead — pause the audio so we can scrub it, resume on release.
+        if (stageIdx === 1 && playSource) { dragWasPlaying = playSource.isPlaying(); playSource.pause(); cancelAnimationFrame(playAnim); }
+        applyFocus(e);
+      } else if (stageIdx === 4 && fpMode === 'spread' && stageData) { inspectFingerprint(e); } // click a fingerprint
     });
     canvas.addEventListener('mousemove', e => { if (dragging) applyFocus(e); });
-    window.addEventListener('mouseup', () => { dragging = false; });
-    canvas.addEventListener('mouseleave', () => { dragging = false; });
+    window.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      // Finish a Fourier scrub: move playback to the slice and continue from there (no restart).
+      if (stageIdx === 1 && playSource) {
+        playSource.seek(stageData.focusFrame * D.CONFIG.hopSize / stageData.sr);
+        if (dragWasPlaying) { playSource.resume(); $('playBtn').textContent = '⏸ Pause'; startPlayheadLoop(); }
+      }
+      dragWasPlaying = false;
+    });
     window.addEventListener('resize', resize);
     resize();
   }
