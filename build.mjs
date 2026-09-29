@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SONGS_DIR = 'songs';
+const SONGS_DIR = process.env.SONGS_DIR || 'songs'; // e.g. SONGS_DIR=songs-web for a smaller hosted build
 const files = readdirSync(SONGS_DIR).filter(f => f.toLowerCase().endsWith('.mp3')).sort();
 if (files.length === 0) throw new Error('No .mp3 files in ./songs');
 

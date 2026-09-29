@@ -1,9 +1,11 @@
 # Source audio — copyrighted, swappable, kept local only
 /songs/
+/songs-web/
 
 # Generated single-file demo (embeds the copyrighted audio)
 /shazam-demo.html
 /dist/
+/dist-web/
 
 # Cached album-art lookups (rebuilt from the iTunes API on demand)
 /art-cache.json
