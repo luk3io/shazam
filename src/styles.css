@@ -34,7 +34,8 @@ button.secondary { background: #23233a; }
 #libraryTitle { color: #9a9ac8; font-size: 18px; }
 #songCards { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 860px; }
 .songCard { background: #16162a; border: 2px solid transparent; border-radius: 12px; padding: 10px;
-  display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: default; color: #e8e8f0; }
+  display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: default; color: #e8e8f0;
+  box-sizing: border-box; width: 128px; } /* fixed width: a playing card can't grow and wrap the row */
 .songCard .thumb { width: 104px; height: 104px; border-radius: 8px; object-fit: cover; background: #23233a;
   display: flex; align-items: center; justify-content: center; font-size: 42px; }
 .songCard .t { font-size: 16px; font-weight: 600; text-align: center; line-height: 1.15; max-width: 112px; }
@@ -42,6 +43,25 @@ button.secondary { background: #23233a; }
 #songCards.selectable .songCard { cursor: pointer; }
 #songCards.selectable .songCard:hover { border-color: #3a3a5a; }
 .songCard.selected { border-color: #4be0c0; background: #1c2b2b; }
+/* Microphone-mode "play out loud" controls: a play/stop pill, a scrub bar, and a time readout, in a
+   bottom-pinned block (margin-top:auto). Hidden in Library mode. The scrub bar + time keep their
+   space even when idle (visibility, not display), so every card is the same height, the Play buttons
+   line up, and a card never changes size — and bumps the last card onto a second row — when it plays. */
+.songCard .controls { display: none; }
+#songCards.withplay .songCard .controls { display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start; gap: 6px; width: 100%; margin-top: auto; padding-top: 8px; min-height: 64px; }
+#songCards.withplay .songCard .play { font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 999px;
+  background: #23233a; color: #e8e8f0; border: 1px solid #3a3a5a; cursor: pointer; user-select: none; }
+#songCards.withplay .songCard .play:hover { background: #2e2e4a; border-color: #4be0c0; }
+#songCards.withplay .songCard.playing { border-color: #4be0c0; background: #1c2b2b; }
+#songCards.withplay .songCard.playing .play { background: #4be0c0; color: #0a0a12; border-color: #4be0c0; }
+#songCards.withplay .songCard .seek { width: 100%; height: 8px; border-radius: 999px; background: #23233a;
+  overflow: hidden; cursor: pointer; visibility: hidden; } /* reserved space; shown only while playing */
+#songCards.withplay .songCard.playing .seek { visibility: visible; }
+.songCard .seekFill { height: 100%; width: 0%; background: #4be0c0; pointer-events: none; }
+#songCards.withplay .songCard .seekTime { display: block; height: 15px; line-height: 15px;
+  font-size: 11px; color: #9a9ac8; visibility: hidden; }
+#songCards.withplay .songCard.playing .seekTime { visibility: visible; }
 #status { color: #9a9ac8; font-size: 19px; min-height: 24px; }
 #normToggle { color: #9a9ac8; font-size: 18px; display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
 #normToggle input { width: 18px; height: 18px; cursor: pointer; }

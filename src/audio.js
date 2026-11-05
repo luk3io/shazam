@@ -134,6 +134,35 @@
   let cancelCurrent = null;
   function cancelCapture() { if (cancelCurrent) cancelCurrent(); }
 
+  // Peak level of the live mic input, read on demand from the warm AnalyserNode (enableMic must have
+  // run). Returns null when the mic isn't enabled. Powers a live "is the mic hearing it?" meter on the
+  // start screen, so the presenter can confirm the mic is picking up a played song BEFORE committing
+  // to a recording.
+  function readMicLevel() {
+    if (!mic) return null;
+    const { analyser, win } = mic;
+    analyser.getFloatTimeDomainData(win);
+    let pk = 0;
+    for (let i = 0; i < win.length; i++) { const a = Math.abs(win[i]); if (a > pk) pk = a; }
+    return pk;
+  }
+  const isMicEnabled = () => !!mic;
+
+  // A full-quality, playable HTMLAudioElement built from a song's embedded compressed audio (the
+  // original MP3). Used to play a library track OUT LOUD through the laptop speakers so the mic can
+  // record it — the acoustic "speaker across the room" fallback for when no external speaker is
+  // available. Deliberately plays the ORIGINAL audio (full rate/stereo), not the 11 kHz mono
+  // fingerprint PCM, so it sounds like the real song; MP3 plays natively in both Chrome and Safari,
+  // sidestepping Web Audio decode quirks. A Blob URL (not a multi-MB data: URL) keeps it light;
+  // call revoke() to free it when done.
+  function makeTrackAudio(song) {
+    const blob = new Blob([base64ToArrayBuffer(song.data)], { type: song.mime || 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const el = new Audio(); el.src = url; el.preload = 'auto';
+    el.revoke = () => { try { URL.revokeObjectURL(url); } catch (e) {} };
+    return el;
+  }
+
   // Even up a recording's loudness over time so a mic that fades on a sustained song (Windows driver
   // AGC, which we can't disable from JS) and a generally-quiet capture both come back to a consistent,
   // audible level. We target a constant short-time RMS: divide each moment by its smoothed RMS envelope
@@ -201,5 +230,5 @@
     };
   }
 
-  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, cancelCapture, normalizeRecording, makeSource };
+  root.AudioIO = { base64ToArrayBuffer, decodeToMono, sliceSeconds, resampleLinear, enableMic, stopMic, captureMicStreaming, cancelCapture, normalizeRecording, makeSource, readMicLevel, isMicEnabled, makeTrackAudio };
 })(typeof self !== 'undefined' ? self : this);

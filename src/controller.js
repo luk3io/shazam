@@ -111,11 +111,14 @@
   const PLAYHEAD = { 0: 'cursor', 1: 'slice' };
   const isPlayable = i => i in PLAYHEAD;
   const $ = id => document.getElementById(id);
-  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
+  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0, captureAnim = null;
   let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
   let selectedSongId = null; // which song the Library picker has selected
   let mode = 'mic';          // start-screen mode: 'mic' (record) or 'library' (pick a song)
   let fpMode = 'spread'; // fingerprints view: 'spread' (~40 anchors, clickable) or 'all' (every fingerprint)
+  let libAudio = null, libAudioId = null; // library track playing OUT LOUD for the mic fallback (speaker-out)
+  let seekDrag = false;      // dragging the playing card's seek bar to scrub the track
+  let micMeterTimer = null;  // start-screen live mic-level meter poll (confirms the mic hears the song)
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -255,8 +258,11 @@
   // Return to the start screen so a new mode/song can be chosen without reloading the page.
   function goHome() {
     stopPlayback();
+    stopLibraryTrack();
+    stopMicMeter();
     IO.stopMic();
     cancelAnimationFrame(anim);
+    cancelAnimationFrame(captureAnim);
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
@@ -271,6 +277,69 @@
     const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
     renderTracker();
     $('start').classList.remove('hidden');
+  }
+
+  // --- Library track playback (Microphone-mode fallback) -----------------------------------------
+  // Play an embedded song OUT LOUD through the laptop speakers so the mic can record it when there's
+  // no external speaker. Independent of the mic pipeline, so it works whether or not the mic has been
+  // enabled, and keeps playing while the presenter enables the mic and records. One track at a time.
+  const fmtTime = t => { t = Math.max(0, t | 0); const m = (t / 60) | 0, s = t % 60; return m + ':' + (s < 10 ? '0' : '') + s; };
+  function updateCardPlayButtons() {
+    document.querySelectorAll('#songCards .songCard').forEach(el => {
+      const playing = el.dataset.id === libAudioId;
+      el.classList.toggle('playing', playing);
+      const b = el.querySelector('.play');
+      if (b) b.textContent = playing ? '■ Stop' : '▶ Play';
+    });
+  }
+  // Reflect the playhead position on the playing card's seek bar (progress fill + m:ss / m:ss).
+  function updateSeekUI() {
+    const el = libAudioId && document.querySelector(`#songCards .songCard[data-id="${libAudioId}"]`);
+    if (!el || !libAudio) return;
+    const dur = libAudio.duration || 0, frac = dur ? Math.max(0, Math.min(1, libAudio.currentTime / dur)) : 0;
+    const fill = el.querySelector('.seekFill'); if (fill) fill.style.width = (frac * 100) + '%';
+    const tl = el.querySelector('.seekTime'); if (tl) tl.textContent = fmtTime(libAudio.currentTime) + ' / ' + fmtTime(dur);
+  }
+  function stopLibraryTrack() {
+    if (libAudio) {
+      // Detach the element from its blob URL (pause + clear src + load) BEFORE revoking the URL, so a
+      // stop mid-load doesn't leave the element fetching a freed blob (a harmless but noisy console error).
+      try { libAudio.pause(); libAudio.removeAttribute('src'); libAudio.load(); } catch (e) {}
+      if (libAudio.revoke) libAudio.revoke();
+    }
+    libAudio = null; libAudioId = null; seekDrag = false;
+    updateCardPlayButtons();
+  }
+  function playLibraryTrack(id) {
+    if (libAudioId === id) { stopLibraryTrack(); return; } // clicking the playing card toggles it off
+    stopLibraryTrack();                                    // switching songs: stop the previous one
+    const s = root.SONGS.find(x => x.id === id);
+    if (!s) return;
+    libAudio = IO.makeTrackAudio(s); libAudioId = id;
+    libAudio.ontimeupdate = updateSeekUI;
+    libAudio.onloadedmetadata = updateSeekUI;
+    libAudio.onended = () => stopLibraryTrack();
+    libAudio.play().catch(err => {
+      // AbortError just means play() was interrupted by an intentional stop (tab switch, another card,
+      // starting analysis) before it resolved — not a real failure, so don't alarm the presenter.
+      if (err && err.name === 'AbortError') return;
+      stopLibraryTrack(); alert('Could not play “' + (s.title || id) + '” (' + (err.name || err.message) + ').');
+    });
+    updateCardPlayButtons(); updateSeekUI();
+  }
+  // Start-screen live mic meter: once the mic is enabled, poll its level so the presenter can press a
+  // library track and watch the bar move — confirming the mic is hearing it BEFORE recording.
+  function startMicMeter() {
+    stopMicMeter();
+    $('levelMeter').classList.remove('hidden');
+    micMeterTimer = setInterval(() => {
+      const lvl = IO.readMicLevel(); if (lvl == null) return;
+      const v = Math.max(0, Math.min(1, lvl));
+      const bar = $('levelBar'); bar.style.width = (v * 100) + '%'; bar.style.opacity = String(.35 + v * .65);
+    }, 60);
+  }
+  function stopMicMeter() {
+    if (micMeterTimer) { clearInterval(micMeterTimer); micMeterTimer = null; }
   }
 
   // Compute every artifact a renderer needs for the given recording PCM, up front.
@@ -307,6 +376,7 @@
         `noise-suppress ${b(settings.noiseSuppression)}` + (settings.sampleRate ? `, ${settings.sampleRate} Hz)` : ')');
       $('modeLive').classList.add('hidden');
       $('recordBtn').classList.remove('hidden');
+      startMicMeter(); // live level on the start screen: press a library track and watch the mic hear it
     } catch (err) {
       $('modeLive').disabled = false;
       $('status').textContent = 'Microphone unavailable: ' + (err.name || err.message);
@@ -318,6 +388,7 @@
   async function runLive() {
     stageData = null; // close the keyboard-gate gap: a stale prior stageData would let
                        // keypresses drive stages during this run's "Listening…" window
+    stopMicMeter(); // the capture loop drives the level meter now — don't double-drive it
     $('start').classList.add('hidden'); $('controls').classList.add('hidden');
     stageIdx = 0; renderTracker();
     // Countdown + live input-level cue so the presenter/audience can see the mic is picking
@@ -361,6 +432,7 @@
       throw err;
     } finally {
       clearInterval(countdown);
+      stopLibraryTrack(); // recording window is over — stop the out-loud song so it doesn't play over the analysis
       $('levelMeter').classList.add('hidden');
       $('stopRecBtn').classList.add('hidden');
     }
@@ -382,25 +454,72 @@
   function selectSong(id) { selectedSongId = id; applyCardHighlights(); }
   function setMode(m) {
     mode = m;
+    stopLibraryTrack(); // switching tabs stops any preview that's playing
     $('tabMic').classList.toggle('active', m === 'mic');
     $('tabLibrary').classList.toggle('active', m === 'library');
     $('micMode').classList.toggle('hidden', m !== 'mic');
     $('libMode').classList.toggle('hidden', m !== 'library');
-    $('songCards').classList.toggle('selectable', m === 'library'); // cards clickable only in Library mode
+    $('songCards').classList.toggle('selectable', m === 'library'); // cards clickable to select only in Library mode
+    $('songCards').classList.add('withplay');                       // per-card play/seek controls in both modes
     $('libraryTitle').textContent = m === 'library'
-      ? '🎵 Library — pick a song to identify'
-      : '🎵 Library — the songs I can recognise';
+      ? '🎵 Library — play a song, then Capture it'
+      : '🎵 Library — play any song so the mic can hear it';
     if (m === 'library' && !selectedSongId && root.SONGS[0]) selectedSongId = root.SONGS[0].id;
     applyCardHighlights();
   }
 
-  async function runCanned() {
-    IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
+  // Library "Capture song": make identifying a song feel like a real mic recording. The song keeps
+  // playing OUT LOUD through a fixed capture period (same 10s as the live mic flow) with a countdown
+  // and a waveform that fills in as it plays — then playback stops and the captured window runs through
+  // the pipeline. The captured 10s is taken from the live playhead if the song is already playing (so
+  // you can play it for the audience, scrub to a recognisable part, and capture that), else from the top.
+  const CAPTURE_SECONDS = 10;
+  async function runCapture() {
+    IO.stopMic(); // release the mic if it was enabled, so its ducking can't quiet the playback
+    const alreadyPlaying = !!(libAudio && libAudioId === selectedSongId && libAudio.duration);
+    const startSec = alreadyPlaying ? libAudio.currentTime : 0;
+    if (!alreadyPlaying) playLibraryTrack(selectedSongId); // not playing yet → start it out loud from the top
     await dbReady;
     const s = root.SONGS.find(x => x.id === selectedSongId) || root.SONGS[0];
-    // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
+    // A cached DB load never decoded the audio, so decode the chosen song now (for the analysed clip).
     if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
-    precompute(IO.sliceSeconds(s._pcm, 30, 10));
+    const clip = IO.sliceSeconds(s._pcm, startSec, CAPTURE_SECONDS); // the window we play out loud AND analyse
+
+    // --- recording-style capture screen: countdown + a waveform that fills as the song plays ---
+    stageData = null; // gate keypresses during the capture window (same as the live mic flow)
+    $('start').classList.add('hidden'); $('controls').classList.add('hidden');
+    stageIdx = 0; renderTracker();
+    $('stopRecBtn').classList.remove('hidden');
+    let cancelled = false;
+    $('stopRecBtn').onclick = () => { cancelled = true; };
+
+    const t0 = performance.now();
+    await new Promise(resolve => {
+      const tick = () => {
+        // Prefer the audio element's own clock so the waveform stays in step with what's actually heard.
+        const elapsed = (libAudio && !libAudio.paused) ? (libAudio.currentTime - startSec) : (performance.now() - t0) / 1000;
+        const frac = Math.max(0, Math.min(1, elapsed / CAPTURE_SECONDS));
+        $('caption').textContent = `Capturing… (${Math.max(0, Math.ceil(CAPTURE_SECONDS - elapsed))}s)`;
+        const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
+        const mid = H / 2, amp = mid * 0.9;
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+        ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 1.5; ctx.beginPath(); // same look as the live waveform
+        const n = Math.floor(frac * clip.length), step = Math.max(1, Math.floor(clip.length / W));
+        for (let i = 0, first = true; i < n; i += step) { const x = (i / clip.length) * W, y = mid + clip[i] * amp; first ? (ctx.moveTo(x, y), first = false) : ctx.lineTo(x, y); }
+        ctx.stroke();
+        if (cancelled || frac >= 1 || (libAudio && libAudio.ended)) { resolve(); return; }
+        captureAnim = requestAnimationFrame(tick);
+      };
+      captureAnim = requestAnimationFrame(tick);
+    });
+    cancelAnimationFrame(captureAnim);
+    $('stopRecBtn').classList.add('hidden');
+    stopLibraryTrack(); // capture period over — stop the out-loud playback
+    if (cancelled) return goHome(); // bailed early → discard and return to the start screen
+
+    $('caption').textContent = 'Analysing…';
+    precompute(clip);
     enterPipeline();
   }
 
@@ -412,8 +531,37 @@
       const card = document.createElement('button');
       card.className = 'songCard'; card.dataset.id = s.id;
       const thumb = s.art ? `<img class="thumb" src="${s.art}" alt="" />` : `<div class="thumb ph">🎵</div>`;
-      card.innerHTML = `${thumb}<span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span>`;
+      card.innerHTML = `${thumb}<span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span>` +
+        `<div class="controls">` +
+          `<span class="play" role="button" tabindex="0">▶ Play</span>` +
+          `<div class="seek"><div class="seekFill"></div></div><span class="seekTime"></span>` +
+        `</div>`;
       card.onclick = () => { if (mode === 'library') selectSong(s.id); };
+      // Microphone-mode "play out loud" control. It's a <span>, not a <button>: the card itself is a
+      // button and nesting buttons is invalid. stopPropagation keeps it from also firing card select.
+      const playEl = card.querySelector('.play');
+      // Preview in either mode. In Library mode, playing also selects the card, so "Play selected song"
+      // always identifies the song you're actually playing (from its playhead).
+      const togglePlay = e => { e.stopPropagation(); if (mode === 'library') selectSong(s.id); playLibraryTrack(s.id); };
+      playEl.addEventListener('click', togglePlay);
+      playEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.code === 'Space') { e.preventDefault(); togglePlay(e); } });
+      // Drag or click the seek bar to move the playhead — only while this card is the one playing.
+      const seek = card.querySelector('.seek');
+      const seekTo = e => {
+        if (!libAudio || libAudioId !== s.id || !libAudio.duration) return;
+        const r = seek.getBoundingClientRect();
+        libAudio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * libAudio.duration;
+        updateSeekUI();
+      };
+      seek.addEventListener('pointerdown', e => {
+        if (libAudioId !== s.id) return; // scrub only the card that's currently playing (either mode)
+        e.stopPropagation(); e.preventDefault();
+        seekDrag = true; try { seek.setPointerCapture(e.pointerId); } catch (_) {} seekTo(e);
+      });
+      seek.addEventListener('pointermove', e => { if (seekDrag) { e.preventDefault(); seekTo(e); } });
+      const endDrag = e => { if (seekDrag) { seekDrag = false; try { seek.releasePointerCapture(e.pointerId); } catch (_) {} } };
+      seek.addEventListener('pointerup', endDrag);
+      seek.addEventListener('pointercancel', endDrag);
       $('songCards').appendChild(card);
     });
     selectedSongId = root.SONGS[0] ? root.SONGS[0].id : null;
@@ -442,7 +590,7 @@
       dbReady = buildDb();
     };
 
-    $('modeCanned').onclick = () => runCanned();
+    $('modeCanned').onclick = () => runCapture();
     $('modeLive').onclick = () => enableMicFlow();
     $('recordBtn').onclick = () => runLive().catch(err => {
       $('start').classList.remove('hidden'); $('controls').classList.add('hidden');

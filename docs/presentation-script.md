@@ -28,6 +28,14 @@ Shazam can calculate the time offset: offset = time in song - time in recording
 When Shazam finds a book on a shelf, it casts a vote for both that song and the time offset. When enough fingerprints cast votes for the same song at the same time offset, Shazam can identify the song and return its information
 Demo:
 
+Pre-flight (do this on the demo machine before presenting):
+- Browser: prefer Chrome or Edge. Safari is fussier about mic settings and recording formats — only fall back to it if Chrome isn't available.
+- No external speaker? Use the laptop itself as the sound source: in Microphone mode each library song now has a ▶ Play button. Press Play (drag the scrub bar to start from a recognisable part), then Enable microphone → Record & identify so the mic picks the song up out of the laptop's own speakers.
+- Confirm pickup first: once you press Enable microphone, the level bar at the bottom goes live. Play a song and watch the bar move — that proves the mic is hearing it before you commit to a recording. Turn the laptop volume up.
+- Windows only: if the played song goes quiet the moment the mic turns on, that's Windows ducking it. Fix: Settings/Control Panel → Sound → Communications tab → "Do nothing". (macOS doesn't do this.)
+- The song stops automatically once the 10-second recording window ends.
+- Most reliable of all (no mic, no speaker, any machine): in Library mode press ▶ Play on a song, scrub to a recognisable part, then "Capture Song" — it keeps playing for a 10s capture window (like a real recording) and then identifies that exact part from the playhead.
+
 AI + embeddings:
 
 Vector Search:
