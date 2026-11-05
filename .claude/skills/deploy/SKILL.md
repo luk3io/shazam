@@ -24,6 +24,21 @@ manual step via `npm run deploy` (`deploy.mjs`).
    ffmpeg -y -i "songs/NAME.mp3" -ac 1 -b:a 64k "songs-web/NAME.mp3"
    ```
 
+## First-time project setup (once per Cloudflare account)
+
+The Pages project must already exist, or deploy fails with
+`The Pages project "luke-shazammer" does not exist.` Create it once:
+
+```
+npx wrangler pages project create luke-shazammer --production-branch=main --force
+```
+
+`--force` is required **only here**: current wrangler (4.x) otherwise delegates
+`pages` commands to the newer Workers flow, which fails for a project that
+doesn't exist yet. `--force` creates it directly on classic Pages. Once the
+project exists, drop `--force` — `npm run deploy` and all later commands run
+against Pages directly. The site then lives at `https://luke-shazammer.pages.dev`.
+
 ## Deploy
 
 ```
@@ -53,6 +68,8 @@ Nothing touches git — the copyrighted audio stays out of the repo.
 - **`No MP3s in ./songs-web/`** — you haven't created the shrunk copies. Run the
   `ffmpeg` command above for each song.
 - **wrangler prompts to log in / 401** — run `npx wrangler login` first.
+- **`The Pages project "luke-shazammer" does not exist.`** — first-time setup
+  wasn't done. Run the `wrangler pages project create … --force` command above once.
 - **Trying to make CI deploy** — don't. The audio is gitignored, so a GitHub
   Action has nothing to build. Deploy is intentionally local-only.
 - **Editing `dist-web/` by hand** — it's generated; change `src/` or `songs-web/`
