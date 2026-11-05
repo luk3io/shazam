@@ -34,7 +34,7 @@ Pre-flight (do this on the demo machine before presenting):
 - Confirm pickup first: once you press Enable microphone, the level bar at the bottom goes live. Play a song and watch the bar move — that proves the mic is hearing it before you commit to a recording. Turn the laptop volume up.
 - Windows only: if the played song goes quiet the moment the mic turns on, that's Windows ducking it. Fix: Settings/Control Panel → Sound → Communications tab → "Do nothing". (macOS doesn't do this.)
 - The song stops automatically once the 10-second recording window ends.
-- Most reliable of all (no mic, no speaker, any machine): in Library mode press ▶ Play on a song, scrub to a recognisable part, then "Play selected song" — it identifies that exact part directly from the playhead.
+- Most reliable of all (no mic, no speaker, any machine): in Library mode press ▶ Play on a song, scrub to a recognisable part, then "Capture Song" — it keeps playing for a 10s capture window (like a real recording) and then identifies that exact part from the playhead.
 
 AI + embeddings:
 

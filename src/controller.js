@@ -111,7 +111,7 @@
   const PLAYHEAD = { 0: 'cursor', 1: 'slice' };
   const isPlayable = i => i in PLAYHEAD;
   const $ = id => document.getElementById(id);
-  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0;
+  let canvas, ctx, stageData = null, db = null, dbReady = null, stageIdx = 0, anim = null, playSource = null, playAnim = null, subStep = 0, captureAnim = null;
   let savedFocus = null; // focusFrame to restore when Fourier-stage playback ends (so the slice returns to where it was)
   let selectedSongId = null; // which song the Library picker has selected
   let mode = 'mic';          // start-screen mode: 'mic' (record) or 'library' (pick a song)
@@ -262,6 +262,7 @@
     stopMicMeter();
     IO.stopMic();
     cancelAnimationFrame(anim);
+    cancelAnimationFrame(captureAnim);
     stageData = null; stageIdx = 0;
     $('controls').classList.add('hidden');
     $('levelMeter').classList.add('hidden');
@@ -461,24 +462,64 @@
     $('songCards').classList.toggle('selectable', m === 'library'); // cards clickable to select only in Library mode
     $('songCards').classList.add('withplay');                       // per-card play/seek controls in both modes
     $('libraryTitle').textContent = m === 'library'
-      ? '🎵 Library — pick a song to identify'
+      ? '🎵 Library — play a song, then Capture it'
       : '🎵 Library — play any song so the mic can hear it';
     if (m === 'library' && !selectedSongId && root.SONGS[0]) selectedSongId = root.SONGS[0].id;
     applyCardHighlights();
   }
 
-  async function runCanned() {
-    IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
-    // If the selected song is the one playing out loud, identify from where its playhead is now —
-    // so you can play a song for the audience, scrub to a recognisable part, and identify that part.
-    // Otherwise fall back to a fixed slice 30s in. Read the playhead BEFORE stopping the preview.
-    const playheadSec = (libAudio && libAudioId === selectedSongId && libAudio.duration) ? libAudio.currentTime : null;
-    stopLibraryTrack(); // stop any out-loud preview before the analysis pipeline takes over
+  // Library "Capture song": make identifying a song feel like a real mic recording. The song keeps
+  // playing OUT LOUD through a fixed capture period (same 10s as the live mic flow) with a countdown
+  // and a waveform that fills in as it plays — then playback stops and the captured window runs through
+  // the pipeline. The captured 10s is taken from the live playhead if the song is already playing (so
+  // you can play it for the audience, scrub to a recognisable part, and capture that), else from the top.
+  const CAPTURE_SECONDS = 10;
+  async function runCapture() {
+    IO.stopMic(); // release the mic if it was enabled, so its ducking can't quiet the playback
+    const alreadyPlaying = !!(libAudio && libAudioId === selectedSongId && libAudio.duration);
+    const startSec = alreadyPlaying ? libAudio.currentTime : 0;
+    if (!alreadyPlaying) playLibraryTrack(selectedSongId); // not playing yet → start it out loud from the top
     await dbReady;
     const s = root.SONGS.find(x => x.id === selectedSongId) || root.SONGS[0];
-    // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
+    // A cached DB load never decoded the audio, so decode the chosen song now (for the analysed clip).
     if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
-    precompute(IO.sliceSeconds(s._pcm, playheadSec != null ? playheadSec : 30, 10));
+    const clip = IO.sliceSeconds(s._pcm, startSec, CAPTURE_SECONDS); // the window we play out loud AND analyse
+
+    // --- recording-style capture screen: countdown + a waveform that fills as the song plays ---
+    stageData = null; // gate keypresses during the capture window (same as the live mic flow)
+    $('start').classList.add('hidden'); $('controls').classList.add('hidden');
+    stageIdx = 0; renderTracker();
+    $('stopRecBtn').classList.remove('hidden');
+    let cancelled = false;
+    $('stopRecBtn').onclick = () => { cancelled = true; };
+
+    const t0 = performance.now();
+    await new Promise(resolve => {
+      const tick = () => {
+        // Prefer the audio element's own clock so the waveform stays in step with what's actually heard.
+        const elapsed = (libAudio && !libAudio.paused) ? (libAudio.currentTime - startSec) : (performance.now() - t0) / 1000;
+        const frac = Math.max(0, Math.min(1, elapsed / CAPTURE_SECONDS));
+        $('caption').textContent = `Capturing… (${Math.max(0, Math.ceil(CAPTURE_SECONDS - elapsed))}s)`;
+        const [W, H] = dims(); ctx.clearRect(0, 0, W, H);
+        const mid = H / 2, amp = mid * 0.9;
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+        ctx.strokeStyle = '#4be0c0'; ctx.lineWidth = 1.5; ctx.beginPath(); // same look as the live waveform
+        const n = Math.floor(frac * clip.length), step = Math.max(1, Math.floor(clip.length / W));
+        for (let i = 0, first = true; i < n; i += step) { const x = (i / clip.length) * W, y = mid + clip[i] * amp; first ? (ctx.moveTo(x, y), first = false) : ctx.lineTo(x, y); }
+        ctx.stroke();
+        if (cancelled || frac >= 1 || (libAudio && libAudio.ended)) { resolve(); return; }
+        captureAnim = requestAnimationFrame(tick);
+      };
+      captureAnim = requestAnimationFrame(tick);
+    });
+    cancelAnimationFrame(captureAnim);
+    $('stopRecBtn').classList.add('hidden');
+    stopLibraryTrack(); // capture period over — stop the out-loud playback
+    if (cancelled) return goHome(); // bailed early → discard and return to the start screen
+
+    $('caption').textContent = 'Analysing…';
+    precompute(clip);
     enterPipeline();
   }
 
@@ -549,7 +590,7 @@
       dbReady = buildDb();
     };
 
-    $('modeCanned').onclick = () => runCanned();
+    $('modeCanned').onclick = () => runCapture();
     $('modeLive').onclick = () => enableMicFlow();
     $('recordBtn').onclick = () => runLive().catch(err => {
       $('start').classList.remove('hidden'); $('controls').classList.add('hidden');
