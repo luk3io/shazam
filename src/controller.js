@@ -469,12 +469,16 @@
 
   async function runCanned() {
     IO.stopMic(); // if the mic was enabled but we're going canned, release it so playback isn't ducked
+    // If the selected song is the one playing out loud, identify from where its playhead is now —
+    // so you can play a song for the audience, scrub to a recognisable part, and identify that part.
+    // Otherwise fall back to a fixed slice 30s in. Read the playhead BEFORE stopping the preview.
+    const playheadSec = (libAudio && libAudioId === selectedSongId && libAudio.duration) ? libAudio.currentTime : null;
     stopLibraryTrack(); // stop any out-loud preview before the analysis pipeline takes over
     await dbReady;
     const s = root.SONGS.find(x => x.id === selectedSongId) || root.SONGS[0];
     // A cached DB load never decoded the audio (only Canned mode needs it), so decode the chosen song now.
     if (!s._pcm) { $('status').textContent = 'Loading song…'; s._pcm = await IO.decodeToMono(IO.base64ToArrayBuffer(s.data)); }
-    precompute(IO.sliceSeconds(s._pcm, 30, 10));
+    precompute(IO.sliceSeconds(s._pcm, playheadSec != null ? playheadSec : 30, 10));
     enterPipeline();
   }
 
@@ -495,7 +499,9 @@
       // Microphone-mode "play out loud" control. It's a <span>, not a <button>: the card itself is a
       // button and nesting buttons is invalid. stopPropagation keeps it from also firing card select.
       const playEl = card.querySelector('.play');
-      const togglePlay = e => { e.stopPropagation(); playLibraryTrack(s.id); }; // preview in either mode
+      // Preview in either mode. In Library mode, playing also selects the card, so "Play selected song"
+      // always identifies the song you're actually playing (from its playhead).
+      const togglePlay = e => { e.stopPropagation(); if (mode === 'library') selectSong(s.id); playLibraryTrack(s.id); };
       playEl.addEventListener('click', togglePlay);
       playEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.code === 'Space') { e.preventDefault(); togglePlay(e); } });
       // Drag or click the seek bar to move the playhead — only while this card is the one playing.
