@@ -1,0 +1,21 @@
+name: test
+
+# Runs the DSP unit tests on every push to main and on every PR targeting main.
+# No audio and no deploy happen here — the site is rebuilt and deployed locally
+# with `npm run deploy` (see deploy.mjs), because the songs are copyrighted and
+# kept out of the repo.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm test

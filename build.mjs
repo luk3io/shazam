@@ -2,7 +2,8 @@
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SONGS_DIR = 'songs';
+const SONGS_DIR = process.env.SONGS_DIR || 'songs'; // e.g. SONGS_DIR=songs-web for a smaller hosted build
+const OUT = process.env.OUT || 'shazam-demo.html';  // e.g. OUT=dist-web/index.html for the hosted deploy
 const files = readdirSync(SONGS_DIR).filter(f => f.toLowerCase().endsWith('.mp3')).sort();
 if (files.length === 0) throw new Error('No .mp3 files in ./songs');
 
@@ -70,7 +71,7 @@ const html = read('src/template.html')
   .replace('/*__WORKER__*/', () => 'var WORKER_SOURCE=' + escapeScriptClose(JSON.stringify(workerSource)) + ';')
   .replace('/*__SCRIPT__*/', () => escapeScriptClose(bundle));
 
-writeFileSync('shazam-demo.html', html);
+writeFileSync(OUT, html);
 const mb = (Buffer.byteLength(html) / 1048576).toFixed(1);
-console.log(`Built shazam-demo.html — ${songs.length} songs, ${mb} MB`);
+console.log(`Built ${OUT} — ${songs.length} songs, ${mb} MB`);
 if (mb > 60) console.warn(`WARNING: ${mb} MB is large; consider fewer songs for faster load.`);
